@@ -12,6 +12,8 @@ php artisan canary:forms contact quote --to=you@example.com
 
 If the emails arrive, the templates, sender, mail provider and queue worker are all working.
 
+![Canary's form picker listing a site's forms, with the forms that send no emails at the bottom](art/canary-art.png)
+
 ## Installation
 
 ```bash

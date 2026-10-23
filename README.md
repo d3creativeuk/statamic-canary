@@ -90,6 +90,10 @@ A scheduled mode that alerts you when a form stops sending, and a Control Panel 
 
 Canary uses each form's own settings and sample data from its blueprint, sends through the queue, and runs from the command line, so it fits a maintenance checklist or a deploy script. The two work well together.
 
+## Support
+
+Canary is maintained by [D3 Creative](https://d3creative.uk). Report bugs or ask questions in [GitHub issues](https://github.com/d3creativeuk/statamic-canary/issues). For enquiries about managed Statamic maintenance, visit [d3creative.uk/services/statamic-maintenance](https://d3creative.uk/services/statamic-maintenance).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -27,6 +27,9 @@ abstract class TestCase extends AddonTestCase
     {
         File::deleteDirectory($this->contentPath());
 
+        // Saved forms are written to the testbench app's resource path.
+        File::delete($this->settingsPath());
+
         parent::tearDown();
     }
 
@@ -47,6 +50,11 @@ abstract class TestCase extends AddonTestCase
         $form->save();
 
         return $form;
+    }
+
+    protected function settingsPath(): string
+    {
+        return resource_path('addons/statamic-canary.yaml');
     }
 
     private function contentPath(string $path = ''): string

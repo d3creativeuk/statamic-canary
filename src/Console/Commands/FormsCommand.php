@@ -6,7 +6,9 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Statamic\Console\RunsInPlease;
+use Statamic\Contracts\Addons\Settings;
 use Statamic\Contracts\Forms\Form as FormContract;
+use Statamic\Facades\Addon;
 use Statamic\Facades\Form;
 use Statamic\Facades\Site;
 use Statamic\Fields\Field;
@@ -14,6 +16,7 @@ use Statamic\Forms\SendEmails;
 use Statamic\Sites\Site as SiteObject;
 use Throwable;
 
+use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\multiselect;
 
 class FormsCommand extends Command
@@ -21,9 +24,10 @@ class FormsCommand extends Command
     use RunsInPlease;
 
     protected $signature = 'canary:forms
-                            {forms?* : Handles of the forms to test. Defaults to canary.forms, or a list to pick from}
+                            {forms?* : Handles of the forms to test. Defaults to canary.forms, then the saved forms, then a list to pick from}
                             {--to= : The address that receives every test email. Defaults to canary.to (CANARY_TO)}
-                            {--site= : Handle of the site to send as. Defaults to the default site}';
+                            {--site= : Handle of the site to send as. Defaults to the default site}
+                            {--pick : Choose forms from the list, even if some are configured or saved}';
 
     protected $description = "Send a form's emails to one address without saving a submission or running its integrations";
 
@@ -70,12 +74,24 @@ class FormsCommand extends Command
 
     private function handles(): array
     {
-        if ($handles = $this->argument('forms') ?: Arr::wrap(config('canary.forms'))) {
+        if ($handles = $this->argument('forms')) {
             return $handles;
         }
 
+        if (! $this->option('pick')) {
+            if ($handles = Arr::wrap(config('canary.forms'))) {
+                return $handles;
+            }
+
+            if ($handles = $this->settings()->get('forms', [])) {
+                $this->components->info('Testing the saved forms. Run with --pick to choose again.');
+
+                return $handles;
+            }
+        }
+
         if (! $this->input->isInteractive()) {
-            $this->components->error('No forms to test. Pass form handles as arguments or list them in canary.forms in config/canary.php.');
+            $this->components->error('No forms to test. Pass form handles as arguments, list them in canary.forms, or run interactively to pick and save them.');
 
             return [];
         }
@@ -91,15 +107,28 @@ class FormsCommand extends Command
         // Forms that send no emails go last: there's nothing for Canary to test in them.
         [$sending, $silent] = $forms->partition(fn (FormContract $form) => $this->emailConfigs($form));
 
-        return multiselect(
+        $handles = multiselect(
             label: 'Which forms should Canary test? '.$forms->count().' '.Str::plural('form', $forms->count()).' found.',
             options: $sending->mapWithKeys(fn (FormContract $form) => [$form->handle() => $form->handle()])
                 ->merge($silent->mapWithKeys(fn (FormContract $form) => [$form->handle() => "{$form->handle()} - sends no emails"]))
                 ->all(),
             scroll: 10,
             required: true,
-            hint: 'Press space to select. To skip this list, pass handles as arguments or set canary.forms.',
+            hint: 'Press space to select.',
         );
+
+        // canary.forms wins over saved forms, so saving would have no effect.
+        if (! config('canary.forms') && confirm('Save these as the forms to test next time?', default: false)) {
+            $this->settings()->set('forms', $handles)->save();
+            $this->components->info('Saved. Run with --pick to choose again.');
+        }
+
+        return $handles;
+    }
+
+    private function settings(): Settings
+    {
+        return Addon::get('d3creative/statamic-canary')->settings();
     }
 
     private function testForm(string $handle, string $to, SiteObject $site): bool

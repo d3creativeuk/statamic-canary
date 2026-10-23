@@ -25,7 +25,7 @@ Requires Statamic 6 and PHP 8.3+.
 ## Usage
 
 ```bash
-php artisan canary:forms {forms?*} {--to=} {--site=}
+php artisan canary:forms {forms?*} {--to=} {--site=} {--pick}
 ```
 
 | | |
@@ -33,32 +33,39 @@ php artisan canary:forms {forms?*} {--to=} {--site=}
 | `forms` | Handles of the forms to test. |
 | `--to` | The address that receives every test email. |
 | `--site` | Handle of the site to send as, on a multisite. Defaults to the default site. |
+| `--pick` | Choose forms from the list, even if some are saved or configured. |
+
+### Picking forms from a list
+
+If you run `canary:forms` with no handles, Canary lists every form on the site and you tick the ones to test. Forms that send no emails are listed last, since there's nothing for Canary to test in them. It never tests every form on its own: many sites have test forms or newsletter-only forms you won't want to send.
+
+After you pick, Canary asks whether to save your choice. If you say yes, later runs test the saved forms without showing the list, including non-interactive runs such as deploy scripts. Run `canary:forms --pick` to choose again.
+
+Saved forms are stored in `resources/addons/statamic-canary.yaml`. Save them on your local copy and commit the file, so every environment tests the same forms.
 
 ### Setting defaults
 
-To make the check a single command after every update, publish the config:
+To set the test address, publish the config:
 
 ```bash
 php artisan vendor:publish --tag=canary-config
 ```
 
-Then set the test address in `.env`, and list the forms you check in `config/canary.php`:
+Then add it to `.env`:
 
 ```env
 CANARY_TO=you@example.com
 ```
 
+Now `php artisan canary:forms` needs no options at all.
+
+You can also list the forms in `config/canary.php` instead of saving them from the list:
+
 ```php
 'forms' => ['contact', 'quote'],
 ```
 
-Now `php artisan canary:forms` checks those forms. Arguments and `--to` still override the config.
-
-### Picking forms from a list
-
-If you run `canary:forms` with no handles and `canary.forms` is empty, Canary lists every form on the site and you tick the ones to test. Forms with no emails are marked, since there's nothing for Canary to send. It never tests every form on its own: many sites have test forms or newsletter-only forms you won't want to send.
-
-In a non-interactive run (a deploy script, or `--no-interaction`), there's no list, so the command fails until you pass handles or set `canary.forms`.
+Canary uses the first of these that gives it any forms: handles passed as arguments, then `canary.forms`, then the saved forms, then the list. With none of them, a non-interactive run (a deploy script, or `--no-interaction`) fails, because it can't show the list.
 
 ### What you'll get
 

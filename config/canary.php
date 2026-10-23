@@ -20,7 +20,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Handles of the forms checked when canary:forms runs without arguments.
-    | Leave it empty to pick forms from a list each time instead.
+    | Leave it empty to pick forms from a list, and optionally save them.
     |
     */
 

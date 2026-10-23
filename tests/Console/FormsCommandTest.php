@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\Test;
 use ReflectionMethod;
 use Statamic\Events\FormSubmitted;
 use Statamic\Events\SubmissionCreated;
+use Statamic\Facades\Addon;
 use Statamic\Facades\Form;
 use Statamic\Fields\Field;
 use Statamic\Forms\Email;
@@ -230,11 +231,80 @@ class FormsCommandTest extends TestCase
                 ['quote'],
                 ['contact', 'quote', 'newsletter', 'contact', 'quote', 'newsletter - sends no emails'],
             )
+            ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->expectsOutputToContain('1 email(s) for quote dispatched')
             ->doesntExpectOutputToContain('for contact')
             ->assertSuccessful();
 
         Mail::assertSent(Email::class, 1);
+        $this->assertFileDoesNotExist($this->settingsPath());
+    }
+
+    #[Test]
+    public function picked_forms_can_be_saved_and_are_used_next_time()
+    {
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL]);
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
+            ->expectsOutputToContain('Saved. Run with --pick to choose again.')
+            ->assertSuccessful();
+
+        $this->assertSame(['quote'], Addon::get('d3creative/statamic-canary')->settings()->get('forms'));
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com', '--no-interaction' => true])
+            ->expectsOutputToContain('Testing the saved forms.')
+            ->expectsOutputToContain('1 email(s) for quote dispatched')
+            ->doesntExpectOutputToContain('for contact')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function pick_shows_the_list_even_when_forms_are_saved()
+    {
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL]);
+        $this->saveForms(['quote']);
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['contact'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
+            ->expectsOutputToContain('1 email(s) for contact dispatched')
+            ->assertSuccessful();
+
+        $this->assertSame(['contact'], Addon::get('d3creative/statamic-canary')->settings()->get('forms'));
+    }
+
+    #[Test]
+    public function configured_forms_win_over_saved_forms()
+    {
+        config(['canary.forms' => ['contact']]);
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL]);
+        $this->saveForms(['quote']);
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com'])
+            ->expectsOutputToContain('1 email(s) for contact dispatched')
+            ->doesntExpectOutputToContain('for quote')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_doesnt_offer_to_save_when_forms_are_configured()
+    {
+        config(['canary.forms' => ['contact']]);
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL]);
+
+        // An unexpected confirmation would fail the test.
+        $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsOutputToContain('1 email(s) for quote dispatched')
+            ->assertSuccessful();
+
+        $this->assertFileDoesNotExist($this->settingsPath());
     }
 
     #[Test]
@@ -327,6 +397,11 @@ class FormsCommandTest extends TestCase
             'key: label pairs' => [['a' => 'A', 'b' => 'B']],
             'key and value items' => [[['key' => 'a', 'value' => 'A'], ['key' => 'b', 'value' => 'B']]],
         ];
+    }
+
+    private function saveForms(array $handles): void
+    {
+        Addon::get('d3creative/statamic-canary')->settings()->set('forms', $handles)->save();
     }
 
     private function callPrivate(string $method, mixed ...$arguments): mixed

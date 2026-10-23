@@ -22,7 +22,7 @@ A real submission (`Statamic\Http\Controllers\FormController`) does four things:
 - `firstOption()` handles all three select option formats from `HasSelectOptions::getOptions()`: a list, `key: label` pairs, and `['key' => …, 'value' => …]` items.
 - No validation runs. Sample values only need to render.
 
-Form handles come from the arguments, then `config('canary.forms')`, then a Laravel Prompts `multiselect()` over `Form::all()` when the run is interactive. There's deliberately no `--all`: many sites have test or newsletter-only forms.
+Form handles come from the arguments, then `config('canary.forms')`, then the `forms` addon setting, then a Laravel Prompts `multiselect()` over `Form::all()` when the run is interactive. `--pick` skips the config and saved forms. After picking, the command offers to save the choice to the addon settings (`resources/addons/statamic-canary.yaml`); it doesn't offer when `canary.forms` is set, since the config would win anyway. The addon has no settings blueprint, so there's no Control Panel settings page. There's deliberately no `--all`: many sites have test or newsletter-only forms.
 
 ## Tests
 

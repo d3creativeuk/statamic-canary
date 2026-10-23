@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Read-only: setup-php also copies the token into Composer's auth.json, so
+# a compromised dependency's scripts would otherwise get a writable token.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: PHP ${{ matrix.php }}${{ matrix.lowest && ' (lowest deps)' || '' }}
@@ -24,9 +29,11 @@ jobs:
             lowest: true
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           coverage: none

@@ -17,6 +17,7 @@ A real submission (`Statamic\Http\Controllers\FormController`) does four things:
 - **`Form::email($config)` changes the in-memory form only.** Never call `$form->save()` in the command, or the client's real recipients are overwritten.
 - **`$form->email()` can be a list or a single associative array** with a `to` key. `emailConfigs()` normalises it, as `SendEmails::emailConfigs()` does.
 - **`Statamic\Forms\SendEmails` is internal**, not public API, and the main maintenance risk. It isn't `ShouldQueue`: it runs at once and `Bus::chain()`s one `config('statamic.forms.send_email_job')` per email (default `SendEmail`, which is queued). CI runs a `--prefer-lowest` job so the oldest Statamic 6 release is tested too.
+- **`$form->store(false)` on the in-memory form is required.** For forms with a `files` field, `SendEmails` chains `DeleteTemporaryAttachments`, which calls `saveQuietly()` on the submission when the form stores submissions. The whole form object is serialised into the jobs, so the in-memory changes reach a queue worker too.
 - **Remove `cc` and `bcc`, don't null them.** Null values make Antlers log `str_replace(): Passing null` deprecations.
 - The unsaved submission serialises through a real queue; the recipients travel in each job's `$config`, not on the form.
 - `firstOption()` handles all three select option formats from `HasSelectOptions::getOptions()`: a list, `key: label` pairs, and `['key' => …, 'value' => …]` items.

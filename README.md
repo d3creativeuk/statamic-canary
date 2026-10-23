@@ -4,7 +4,7 @@
 
 The usual way to check a live form is to submit it. That saves a submission, signs the address up to newsletters, creates a lead in the CRM and emails the client's staff, who then ask what happened.
 
-Canary sends a form's **real** emails (its own template, subject, from address and mailer) to **one test address**, through the **real queue**. It doesn't save a submission or run the form's listeners, so newsletter and CRM integrations never see it.
+Canary sends a form's **real** emails (its own template, subject, from address and mailer) to **one test address**, through the **real queue**. It doesn't save a submission or run the form's listeners, so newsletter and CRM integrations never see it, and it never changes the form itself.
 
 ```bash
 php artisan canary:forms contact quote --to=you@example.com
@@ -77,13 +77,32 @@ For each form, Canary builds an unsaved submission filled with sample values fro
 
 Everything else, including the template, `from`, `reply_to` and `mailer`, is unchanged. Email fields are filled with your test address, so automatic replies to the visitor come back to you too. Text fields get `Test`, so a subject like `{{ full_name }} submitted the contact form.` arrives as "TEST: Test submitted the contact form."
 
-Nothing is saved. The form's real recipients are only changed in memory and never written back.
+These changes are made to a copy of the form's settings in memory, never to the form itself. See [Canary doesn't change your site](#canary-doesnt-change-your-site).
 
 ### Exit codes
 
 The command exits non-zero if a form doesn't exist or its emails fail to dispatch, so a deploy script can stop. A form with no emails shows a warning but doesn't fail the run.
 
 If the queue connection is `sync`, Canary warns you: the templates and sender are tested, but no queue worker is.
+
+## Canary doesn't change your site
+
+Canary never edits your forms, templates, config or content.
+
+- **Form settings.** Canary loads the form and swaps the recipients on that loaded copy, in memory, for the length of the run. The form's file is never written, so the next real submission goes to the real recipients as usual.
+- **Submissions.** None are saved, even for forms that store submissions or accept file uploads.
+- **Integrations.** `FormSubmitted` and `SubmissionCreated` aren't fired, so newsletter, CRM and other form listeners don't run.
+
+The only file Canary writes is `resources/addons/statamic-canary.yaml`, and only when you choose to save your picked forms.
+
+### What could still email someone else
+
+Canary controls the recipients it hands to Statamic. Anything that changes recipients after that is outside its control, for example:
+
+- a custom `send_email_job` in `config/statamic/forms.php` that loads the form again or chooses its own recipients
+- a listener on Laravel's `MessageSending` event, or a mail provider rule, that adds a recipient (such as an automatic BCC) to every email the site sends
+
+On a site you don't know, check for these before running Canary, or run it with `MAIL_MAILER=log` first and read the recipients in the log.
 
 ## What Canary doesn't check
 

@@ -158,6 +158,10 @@ class FormsCommand extends Command
             ['to' => $to, 'subject' => 'TEST: '.($email['subject'] ?? 'form email')]
         ))->all());
 
+        // For forms with a files field, SendEmails chains DeleteTemporaryAttachments,
+        // which saves the submission if the form stores them.
+        $form->store(false);
+
         try {
             SendEmails::dispatchSync($submission, $site);
         } catch (Throwable $e) {

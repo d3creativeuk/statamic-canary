@@ -115,6 +115,23 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_doesnt_save_a_submission_for_a_form_with_file_uploads()
+    {
+        // SendEmails chains DeleteTemporaryAttachments for forms with a files
+        // field, and that job saves the submission when the form stores them.
+        $this->makeForm('application', [self::CLIENT_EMAIL], [
+            ['handle' => 'full_name', 'field' => ['type' => 'text']],
+            ['handle' => 'cv', 'field' => ['type' => 'files']],
+        ], store: true);
+
+        $this->artisan('canary:forms', ['forms' => ['application'], '--to' => 'me@example.com'])->assertSuccessful();
+
+        Mail::assertSent(Email::class, 1);
+        $this->assertCount(0, Form::find('application')->submissions());
+        $this->assertTrue(Form::find('application')->store());
+    }
+
+    #[Test]
     public function it_leaves_the_saved_form_unchanged()
     {
         $this->makeForm('contact', [self::CLIENT_EMAIL]);

@@ -88,11 +88,14 @@ class FormsCommand extends Command
             return [];
         }
 
+        // Forms that send no emails go last: there's nothing for Canary to test in them.
+        [$sending, $silent] = $forms->partition(fn (FormContract $form) => $this->emailConfigs($form));
+
         return multiselect(
             label: 'Which forms should Canary test? '.$forms->count().' '.Str::plural('form', $forms->count()).' found.',
-            options: $forms->mapWithKeys(fn (FormContract $form) => [
-                $form->handle() => $form->handle().($this->emailConfigs($form) ? '' : ' - no emails'),
-            ])->all(),
+            options: $sending->mapWithKeys(fn (FormContract $form) => [$form->handle() => $form->handle()])
+                ->merge($silent->mapWithKeys(fn (FormContract $form) => [$form->handle() => "{$form->handle()} - sends no emails"]))
+                ->all(),
             scroll: 10,
             required: true,
             hint: 'Press space to select. To skip this list, pass handles as arguments or set canary.forms.',
@@ -108,7 +111,7 @@ class FormsCommand extends Command
         }
 
         if (! $emails = $this->emailConfigs($form)) {
-            $this->components->warn("{$handle} has no emails configured, so there is nothing to send.");
+            $this->components->warn("{$handle} sends no emails, so there is nothing to test.");
 
             return true;
         }

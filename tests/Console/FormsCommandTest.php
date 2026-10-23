@@ -142,7 +142,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('newsletter');
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain('newsletter has no emails configured')
+            ->expectsOutputToContain('newsletter sends no emails, so there is nothing to test.')
             ->assertSuccessful();
 
         Mail::assertNothingSent();
@@ -228,7 +228,7 @@ class FormsCommandTest extends TestCase
             ->expectsChoice(
                 'Which forms should Canary test? 3 forms found.',
                 ['quote'],
-                ['contact', 'newsletter', 'quote', 'contact', 'newsletter - no emails', 'quote'],
+                ['contact', 'quote', 'newsletter', 'contact', 'quote', 'newsletter - sends no emails'],
             )
             ->expectsOutputToContain('1 email(s) for quote dispatched')
             ->doesntExpectOutputToContain('for contact')

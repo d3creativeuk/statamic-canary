@@ -226,9 +226,9 @@ class FormsCommandTest extends TestCase
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
             ->expectsChoice(
-                'Which forms should Canary test?',
+                'Which forms should Canary test? 3 forms found.',
                 ['quote'],
-                ['contact', 'newsletter', 'quote', 'Contact (contact)', 'Newsletter (newsletter) - no emails', 'Quote (quote)'],
+                ['contact', 'newsletter', 'quote', 'contact', 'newsletter - no emails', 'quote'],
             )
             ->expectsOutputToContain('1 email(s) for quote dispatched')
             ->doesntExpectOutputToContain('for contact')

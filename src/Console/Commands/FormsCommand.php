@@ -4,6 +4,7 @@ namespace D3Creative\Canary\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 use Statamic\Console\RunsInPlease;
 use Statamic\Contracts\Forms\Form as FormContract;
 use Statamic\Facades\Form;
@@ -88,12 +89,13 @@ class FormsCommand extends Command
         }
 
         return multiselect(
-            label: 'Which forms should Canary test?',
+            label: 'Which forms should Canary test? '.$forms->count().' '.Str::plural('form', $forms->count()).' found.',
             options: $forms->mapWithKeys(fn (FormContract $form) => [
-                $form->handle() => "{$form->title()} ({$form->handle()})".($this->emailConfigs($form) ? '' : ' - no emails'),
+                $form->handle() => $form->handle().($this->emailConfigs($form) ? '' : ' - no emails'),
             ])->all(),
+            scroll: 10,
             required: true,
-            hint: 'To skip this list, pass handles as arguments or set canary.forms.',
+            hint: 'Press space to select. To skip this list, pass handles as arguments or set canary.forms.',
         );
     }
 

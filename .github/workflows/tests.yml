@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: PHP ${{ matrix.php }}${{ matrix.lowest && ' (lowest deps)' || '' }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # composer.lock isn't committed, so each PHP version resolves the
+        # newest Statamic it supports. 8.3 is the floor: Statamic 6 pulls
+        # Laravel 12.40+/13, which requires PHP ^8.3.
+        php: ['8.3', '8.4', '8.5']
+        lowest: [false]
+        # Canary relies on Statamic\Forms\SendEmails, which is internal, so
+        # also test the oldest Statamic 6 release the constraint allows.
+        include:
+          - php: '8.3'
+            lowest: true
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer update --no-interaction --no-progress --prefer-dist ${{ matrix.lowest && '--prefer-lowest' || '' }}
+
+      - name: Run tests
+        run: vendor/bin/phpunit

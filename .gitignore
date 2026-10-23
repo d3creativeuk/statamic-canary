@@ -1,0 +1,8 @@
+vendor/
+.DS_Store
+.idea/
+.vscode/
+*.log
+.phpunit.cache/
+composer.lock
+tests/__fixtures__/

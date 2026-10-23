@@ -12,7 +12,7 @@ php artisan canary:forms contact quote --to=you@example.com
 
 If the emails arrive, the templates, sender, mail provider and queue worker are all working.
 
-![Canary's form picker listing a site's forms, with the forms that send no emails at the bottom](art/canary-art.png)
+![Canary by D3 Creative](art/canary-art.jpg)
 
 ## Installation
 
@@ -38,6 +38,8 @@ php artisan canary:forms {forms?*} {--to=} {--site=} {--pick}
 ### Picking forms from a list
 
 If you run `canary:forms` with no handles, Canary lists every form on the site and you tick the ones to test. Forms that send no emails are listed last, since there's nothing for Canary to test in them. It never tests every form on its own: many sites have test forms or newsletter-only forms you won't want to send.
+
+![Canary's form picker listing a site's forms, with the forms that send no emails at the bottom](art/canary-picker.png)
 
 After you pick, Canary asks whether to save your choice. If you say yes, later runs test the saved forms without showing the list, including non-interactive runs such as deploy scripts. Run `canary:forms --pick` to choose again.
 

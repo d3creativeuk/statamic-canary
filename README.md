@@ -112,7 +112,7 @@ These changes are made to a copy of the form's settings in memory, never to the 
 
 The command exits non-zero if a form doesn't exist, its emails fail to dispatch or an integration check fails, so a deploy script can stop. A form with nothing to test shows a warning but doesn't fail the run.
 
-If the queue connection is `sync`, Canary warns you: the templates and sender are tested, but no queue worker is.
+Canary names the queue connection and queue the emails go on, so you know which worker has to run them. If the connection is `sync`, it warns you instead: the templates and sender are tested, but no queue worker is.
 
 ## Checking integrations
 

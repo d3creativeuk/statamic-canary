@@ -69,9 +69,7 @@ class FormsCommand extends Command
             return self::FAILURE;
         }
 
-        if (config('queue.default') === 'sync') {
-            $this->components->warn('The queue connection is sync, so this tests the templates and sender but not a queue worker.');
-        }
+        $this->reportQueue();
 
         $failed = false;
 
@@ -80,6 +78,27 @@ class FormsCommand extends Command
         }
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * SendEmail jobs go on the default connection, so name it and its queue: a
+     * worker started with --queue for another queue never picks them up.
+     */
+    private function reportQueue(): void
+    {
+        $connection = config('queue.default');
+        $driver = config("queue.connections.{$connection}.driver", $connection);
+
+        if ($driver === 'sync') {
+            $this->components->warn("The queue connection is {$connection}, so this tests the templates and sender but not a queue worker.");
+
+            return;
+        }
+
+        $queue = config("queue.connections.{$connection}.queue");
+        $where = ($queue ? "the {$queue} queue of " : '')."the {$connection} connection".($driver !== $connection ? " ({$driver})" : '');
+
+        $this->components->info("Emails go on {$where}, so they only send when a queue worker runs.");
     }
 
     private function handles(): array

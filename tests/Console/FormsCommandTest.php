@@ -94,6 +94,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('contact', [self::CLIENT_EMAIL]);
 
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Emails go on the default queue of the redis connection, so they only send when a queue worker runs.')
             ->doesntExpectOutputToContain('queue connection is sync')
             ->assertSuccessful();
 
@@ -209,6 +210,22 @@ class FormsCommandTest extends TestCase
 
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
             ->expectsOutputToContain('The queue connection is sync')
+            ->doesntExpectOutputToContain('Emails go on')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_names_the_driver_when_the_connection_is_named_differently()
+    {
+        config([
+            'queue.default' => 'emails',
+            'queue.connections.emails' => ['driver' => 'database', 'queue' => 'mail'],
+        ]);
+        Queue::fake();
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Emails go on the mail queue of the emails connection (database)')
             ->assertSuccessful();
     }
 

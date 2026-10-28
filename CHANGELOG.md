@@ -24,6 +24,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 - **`--subscribe`** runs each integration's listener alone with a test submission, checks the
   contact arrived, then deletes it. It needs `canaryContact()` and `canaryDelete()`, and
   refuses to run if the test address is already a contact.
+- **Every run names the queue connection and queue** the emails go on, such as
+  `the default queue of the redis connection`, so you know which worker has to run them.
 
 ### Changed
 

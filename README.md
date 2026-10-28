@@ -103,41 +103,133 @@ If the queue connection is `sync`, Canary warns you: the templates and sender ar
 
 Newsletter and CRM integrations are usually listeners on `FormSubmitted`. A listener decides which forms it handles in its own code, so Canary can't tell from outside which forms reach MailerLite. Running the listener to find out would add a real contact.
 
-Instead, a listener tells Canary about itself through a few plain methods. Canary looks for them by name, so the listener never depends on Canary, and removing Canary never breaks it.
+For the full check, a listener tells Canary about itself through a few plain methods. Canary looks for them by name, so the listener never depends on Canary, and removing Canary never breaks it. Without them, Canary reads the listener's code instead and can check less. See [Without the methods](#without-the-methods).
+
+| Method | What it does |
+|---|---|
+| `canaryForms(): array` | Each form the listener handles, and the fields it reads: `['contact' => ['email']]`. |
+| `canaryName(): string` | The name shown in the list and the output, such as `MailerLite`. Defaults to the class name. |
+| `canaryCheck(string $form): void` | A read-only API call that throws if something's wrong, such as a bad API key or a deleted list. |
+| `canaryContact(string $form, string $email): ?string` | The ID of the contact with this email address, or `null`. Only needed for `--subscribe`. |
+| `canaryDelete(string $form, string $id): void` | Deletes that contact. Only needed for `--subscribe`. |
+
+### MailerLite example
+
+For a listener that uses the [MailerLite PHP SDK](https://github.com/mailerlite/mailerlite-php) and sends each form to a group:
 
 ```php
+use MailerLite\Exceptions\MailerLiteHttpException;
+use MailerLite\MailerLite;
+use Statamic\Events\FormSubmitted;
+
 class MailerLiteSubscriber
 {
+    // Form handle => MailerLite group ID
     protected array $groups = [
         'newsletter' => '1234567890',
         'statamic_alerts' => '0987654321',
     ];
 
-    public function handle(FormSubmitted $event) { /* ... */ }
+    public function handle(FormSubmitted $event) { /* adds the subscriber to the form's group */ }
 
-    // Required: each form this listener handles, and the fields it reads.
-    public function canaryForms(): array
-    {
-        return array_map(fn () => ['email'], $this->groups);
-    }
-
-    // The name shown in the list and the output. Defaults to the class name.
     public function canaryName(): string
     {
         return 'MailerLite';
     }
 
-    // A read-only API call that throws if something's wrong.
+    public function canaryForms(): array
+    {
+        return array_map(fn () => ['email'], $this->groups);
+    }
+
     public function canaryCheck(string $form): void
     {
+        // Throws if the API key is wrong or the group has gone.
         $this->mailerLite()->groups->find($this->groups[$form]);
     }
 
-    // Only needed for --subscribe: find a contact's ID by email, and delete a contact.
-    public function canaryContact(string $form, string $email): ?string { /* ... */ }
-    public function canaryDelete(string $form, string $id): void { /* ... */ }
+    public function canaryContact(string $form, string $email): ?string
+    {
+        try {
+            return $this->mailerLite()->subscribers->find($email)['body']['data']['id'] ?? null;
+        } catch (MailerLiteHttpException $e) {
+            if ($e->getCode() === 404) {
+                return null;
+            }
+
+            throw $e;
+        }
+    }
+
+    public function canaryDelete(string $form, string $id): void
+    {
+        $this->mailerLite()->subscribers->delete($id);
+    }
+
+    private function mailerLite(): MailerLite
+    {
+        return new MailerLite(['api_key' => config('services.mailerlite.api_key')]);
+    }
 }
 ```
+
+### ActiveCampaign example
+
+For a listener that calls the [ActiveCampaign API](https://developers.activecampaign.com/reference/overview) with Laravel's HTTP client and adds each form to a list:
+
+```php
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Http;
+use Statamic\Events\FormSubmitted;
+
+class ActiveCampaignSubscriber
+{
+    // Form handle => ActiveCampaign list ID
+    protected array $lists = [
+        'contact' => 3,
+        'newsletter' => 7,
+    ];
+
+    public function handle(FormSubmitted $event) { /* adds the contact to the form's list */ }
+
+    public function canaryName(): string
+    {
+        return 'ActiveCampaign';
+    }
+
+    public function canaryForms(): array
+    {
+        return array_map(fn () => ['email'], $this->lists);
+    }
+
+    public function canaryCheck(string $form): void
+    {
+        // Throws if the API key is wrong or the list has gone.
+        $this->activeCampaign()->get("/api/3/lists/{$this->lists[$form]}")->throw();
+    }
+
+    public function canaryContact(string $form, string $email): ?string
+    {
+        return $this->activeCampaign()->get('/api/3/contacts', ['email' => $email])->throw()->json('contacts.0.id');
+    }
+
+    public function canaryDelete(string $form, string $id): void
+    {
+        $this->activeCampaign()->delete("/api/3/contacts/{$id}")->throw();
+    }
+
+    private function activeCampaign(): PendingRequest
+    {
+        return Http::baseUrl(config('services.activecampaign.url'))
+            ->withHeaders(['Api-Token' => config('services.activecampaign.key')])
+            ->acceptJson();
+    }
+}
+```
+
+`services.activecampaign.url` is your account's API URL, such as `https://youraccount.api-us1.com`, from **Settings → Developer** in ActiveCampaign. If a form adds contacts to an automation rather than a list, check the automation in `canaryCheck()` with `GET /api/3/automations/{id}` instead.
+
+ActiveCampaign automations often notify the client's staff, for example by emailing their sales team when someone fills in the contact form. Deleting the test contact afterwards doesn't take that email back, so don't run `--subscribe` on a site like that.
 
 One listener can handle many forms, and one form can have several listeners. Canary checks each listener for each form.
 

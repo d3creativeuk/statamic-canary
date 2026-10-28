@@ -2,8 +2,10 @@
 
 namespace D3Creative\Canary\Tests\Console;
 
+use D3Creative\Canary\Tests\Fixtures\App\Listeners\PlainListener;
 use D3Creative\Canary\Tests\Fixtures\FakeCrm;
 use D3Creative\Canary\Tests\TestCase;
+use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
@@ -183,6 +185,22 @@ class IntegrationsTest extends TestCase
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--subscribe' => true])
             ->expectsOutputToContain('newsletter: ForgottenCRM check passed. It has no canaryContact and canaryDelete methods, so --subscribe was skipped.')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_warns_about_listeners_without_the_canary_methods()
+    {
+        $this->makeForm('contact', [self::EMAIL]);
+        Event::listen(FormSubmitted::class, PlainListener::class);
+        Event::listen(SubmissionCreated::class, SendEmailVerificationNotification::class);
+        Event::listen(FormSubmitted::class, function () {});
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain(PlainListener::class.' listens for form submissions but has no Canary methods, so the forms it handles aren\'t tested.')
+            ->expectsOutputToContain(SendEmailVerificationNotification::class.' listens for form submissions. It comes from a package')
+            ->expectsOutputToContain("A closure listens for form submissions. Canary can't check it")
+            ->doesntExpectOutputToContain(FakeCrm::class)
             ->assertSuccessful();
     }
 

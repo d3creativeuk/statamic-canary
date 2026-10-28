@@ -2,6 +2,7 @@
 
 namespace D3Creative\Canary\Forms;
 
+use Composer\Autoload\ClassLoader;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
@@ -52,6 +53,33 @@ class Integration
             ->map(fn ($class) => new self($class));
 
         return $registered->values()->merge($unregistered);
+    }
+
+    /**
+     * Form listeners without canaryForms(), so Canary can't know which forms
+     * they handle. A closure is listed as null.
+     */
+    public static function unconfigured(): Collection
+    {
+        return collect(self::EVENTS)
+            ->flatMap(fn ($event) => collect(Event::getRawListeners()[$event] ?? [])
+                ->map(fn ($listener) => self::parse($listener, $event)))
+            ->reject(fn (?self $integration) => $integration && method_exists($integration->class, 'canaryForms'))
+            ->map(fn (?self $integration) => $integration?->class)
+            ->unique()
+            ->values();
+    }
+
+    /**
+     * Whether a class is installed by Composer, so the site can't add methods to it.
+     */
+    public static function fromPackage(string $class): bool
+    {
+        $file = (new ReflectionClass($class))->getFileName();
+
+        // Keyed by each vendor directory. Herd preloads its own loader, so ClassLoader's own path can't be used.
+        return collect(array_keys(ClassLoader::getRegisteredLoaders()))
+            ->contains(fn ($vendor) => str_starts_with($file, $vendor.DIRECTORY_SEPARATOR));
     }
 
     public function name(): string

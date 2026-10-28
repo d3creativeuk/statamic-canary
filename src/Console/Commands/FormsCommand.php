@@ -33,6 +33,8 @@ class FormsCommand extends Command
                             {--pick : Choose forms from the list, even if some are configured or saved}
                             {--subscribe : Also add the test address through each integration, then delete it}';
 
+    private const INTEGRATION_DOCS = 'https://github.com/d3creativeuk/statamic-canary#checking-integrations';
+
     protected $description = "Send a form's emails to one address and check its integrations, without saving a submission";
 
     private ?Collection $integrations = null;
@@ -60,6 +62,8 @@ class FormsCommand extends Command
 
             return self::FAILURE;
         }
+
+        $this->warnAboutUnconfiguredListeners();
 
         if (! $handles = $this->handles()) {
             return self::FAILURE;
@@ -139,6 +143,20 @@ class FormsCommand extends Command
         $this->integrations ??= Integration::all();
 
         return $this->integrations->filter(fn (Integration $integration) => $integration->handles($form))->values();
+    }
+
+    /**
+     * Without the Canary methods, a listener's forms would look like they have no integrations.
+     */
+    private function warnAboutUnconfiguredListeners(): void
+    {
+        foreach (Integration::unconfigured() as $class) {
+            $this->components->warn(match (true) {
+                $class === null => "A closure listens for form submissions. Canary can't check it, so the forms it handles aren't tested. Move it to a listener class with the Canary methods to check them.",
+                Integration::fromPackage($class) => "{$class} listens for form submissions. It comes from a package, so Canary can't check the forms it handles.",
+                default => "{$class} listens for form submissions but has no Canary methods, so the forms it handles aren't tested. Add the methods described at ".self::INTEGRATION_DOCS.' to check them.',
+            });
+        }
     }
 
     private function settings(): Settings

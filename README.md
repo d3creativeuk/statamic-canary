@@ -141,6 +141,14 @@ class MailerLiteSubscriber
 
 One listener can handle many forms, and one form can have several listeners. Canary checks each listener for each form.
 
+Canary never adds these methods for you: it doesn't change your code, and only you know where a listener keeps its form-to-list map and which field holds the email address. Until a listener has them, every run starts with a warning naming it:
+
+```
+WARN  App\Listeners\ActiveCampaignSubscriber listens for form submissions but has no Canary methods, so the forms it handles aren't tested.
+```
+
+Its forms show `no emails or integrations found` in the list, because Canary can't see which ones it handles. Listeners from a package and closure listeners get their own warning, since you can't add methods to them.
+
 For each integration on a form, a normal run checks that:
 
 1. **The listener is registered** for `FormSubmitted` or `SubmissionCreated`. Canary also looks through `app/Listeners` for classes with the Canary methods, so a listener someone has removed from `EventServiceProvider` is reported, not missed.
@@ -188,7 +196,7 @@ On a site you don't know, check for these before running Canary, or run it with 
 
 ## What Canary doesn't check
 
-- **Listeners without the Canary methods.** Canary can't see which forms they handle, so it doesn't test them.
+- **Listeners without the Canary methods.** Canary can't see which forms they handle, so it warns about them but doesn't test them.
 - **Integrations that aren't listeners**, such as a webhook from a third-party addon.
 - **Validation.** Sample values only need to render in a template. Canary tests the email path, not the form.
 - **The inbox.** Canary proves the email jobs were dispatched. Checking that they arrived is up to you.

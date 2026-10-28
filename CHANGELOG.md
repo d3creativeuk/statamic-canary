@@ -15,7 +15,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   (`canaryForms()`, `canaryName()`, `canaryCheck()`), with no dependency on Canary.
   `canary:forms` then checks each one is registered, the form still has the fields it reads,
   and a read-only API call succeeds. Listeners in `app/Listeners` that have the methods but
-  aren't registered are reported.
+  aren't registered are reported, and every run warns about form listeners that don't have
+  the methods yet, so their forms aren't mistaken for having no integrations.
 - **`--subscribe`** runs each integration's listener alone with a test submission, checks the
   contact arrived, then deletes it. It needs `canaryContact()` and `canaryDelete()`, and
   refuses to run if the test address is already a contact.

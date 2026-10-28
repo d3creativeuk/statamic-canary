@@ -2,8 +2,11 @@
 
 namespace D3Creative\Canary\Console\Commands;
 
+use D3Creative\Canary\Forms\Integration;
+use D3Creative\Canary\Forms\TestSubmission;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Statamic\Console\RunsInPlease;
 use Statamic\Contracts\Addons\Settings;
@@ -27,9 +30,12 @@ class FormsCommand extends Command
                             {forms?* : Handles of the forms to test. Defaults to canary.forms, then the saved forms, then a list to pick from}
                             {--to= : The address that receives every test email. Defaults to canary.to (CANARY_TO)}
                             {--site= : Handle of the site to send as. Defaults to the default site}
-                            {--pick : Choose forms from the list, even if some are configured or saved}';
+                            {--pick : Choose forms from the list, even if some are configured or saved}
+                            {--subscribe : Also add the test address through each integration, then delete it}';
 
-    protected $description = "Send a form's emails to one address without saving a submission or running its integrations";
+    protected $description = "Send a form's emails to one address and check its integrations, without saving a submission";
+
+    private ?Collection $integrations = null;
 
     public function handle(): int
     {
@@ -104,13 +110,15 @@ class FormsCommand extends Command
             return [];
         }
 
-        // Forms that send no emails go last: there's nothing for Canary to test in them.
-        [$sending, $silent] = $forms->partition(fn (FormContract $form) => $this->emailConfigs($form));
+        $tests = $forms->mapWithKeys(fn (FormContract $form) => [$form->handle() => $this->tests($form)]);
+
+        // Forms with nothing to test go last.
+        [$testable, $untestable] = $tests->partition(fn ($tests) => $tests);
 
         $handles = multiselect(
             label: 'Which forms should Canary test? '.$forms->count().' '.Str::plural('form', $forms->count()).' found.',
-            options: $sending->mapWithKeys(fn (FormContract $form) => [$form->handle() => $form->handle()])
-                ->merge($silent->mapWithKeys(fn (FormContract $form) => [$form->handle() => "{$form->handle()} - sends no emails"]))
+            options: $testable->map(fn ($tests, $handle) => "{$handle} - ".implode(', ', $tests))
+                ->merge($untestable->map(fn ($tests, $handle) => "{$handle} - no emails or integrations found"))
                 ->all(),
             scroll: 10,
             required: true,
@@ -126,9 +134,28 @@ class FormsCommand extends Command
         return $handles;
     }
 
+    private function integrations(string $form): Collection
+    {
+        $this->integrations ??= Integration::all();
+
+        return $this->integrations->filter(fn (Integration $integration) => $integration->handles($form))->values();
+    }
+
     private function settings(): Settings
     {
         return Addon::get('d3creative/statamic-canary')->settings();
+    }
+
+    /**
+     * What Canary can test in a form, e.g. ['emails', 'MailerLite'].
+     */
+    private function tests(FormContract $form): array
+    {
+        return collect($this->emailConfigs($form) ? ['emails'] : [])
+            ->merge($this->integrations($form->handle())->map(
+                fn (Integration $integration) => $integration->name().($integration->registered() ? '' : ' (not registered)')
+            ))
+            ->all();
     }
 
     private function testForm(string $handle, string $to, SiteObject $site): bool
@@ -139,18 +166,27 @@ class FormsCommand extends Command
             return false;
         }
 
-        if (! $emails = $this->emailConfigs($form)) {
-            $this->components->warn("{$handle} sends no emails, so there is nothing to test.");
+        $emails = $this->emailConfigs($form);
+        $integrations = $this->integrations($handle);
+
+        if (! $emails && $integrations->isEmpty()) {
+            $this->components->warn("{$handle} has no emails or integrations, so there is nothing to test.");
 
             return true;
         }
 
-        $submission = $form->makeSubmission()->data(
-            $form->blueprint()->fields()->all()
-                ->mapWithKeys(fn (Field $field) => [$field->handle() => $this->sampleValue($field, $to)])
-                ->filter(fn ($value) => ! is_null($value))
-                ->all()
-        );
+        $passed = ! $emails || $this->sendEmails($form, $emails, $to, $site);
+
+        foreach ($integrations as $integration) {
+            $passed = $this->checkIntegration($form, $integration, $to) && $passed;
+        }
+
+        return $passed;
+    }
+
+    private function sendEmails(FormContract $form, array $emails, string $to, SiteObject $site): bool
+    {
+        $submission = $form->makeSubmission()->data($this->sampleData($form, $to));
 
         // Changes the in-memory form only. Never save it, or the real recipients are overwritten.
         $form->email(collect($emails)->map(fn ($email) => array_merge(
@@ -165,12 +201,94 @@ class FormsCommand extends Command
         try {
             SendEmails::dispatchSync($submission, $site);
         } catch (Throwable $e) {
-            $this->components->error("{$handle}: {$e->getMessage()}");
+            $this->components->error("{$form->handle()}: {$e->getMessage()}");
 
             return false;
         }
 
-        $this->components->info(count($emails)." email(s) for {$handle} dispatched to {$to}.");
+        $this->components->info(count($emails)." email(s) for {$form->handle()} dispatched to {$to}.");
+
+        return true;
+    }
+
+    private function checkIntegration(FormContract $form, Integration $integration, string $to): bool
+    {
+        $label = "{$form->handle()}: {$integration->name()}";
+
+        if (! $integration->registered()) {
+            $this->components->error("{$label} isn't listening for form submissions, so it never runs. Check EventServiceProvider.");
+
+            return false;
+        }
+
+        $missing = collect($integration->forms()[$form->handle()])
+            ->reject(fn ($field) => $form->blueprint()->hasField($field));
+
+        if ($missing->isNotEmpty()) {
+            $this->components->error("{$label} reads ".$missing->implode(', ').', which '.($missing->count() === 1 ? "isn't a field" : "aren't fields").' on the form.');
+
+            return false;
+        }
+
+        if (method_exists($integration->class, 'canaryCheck')) {
+            try {
+                $integration->listener()->canaryCheck($form->handle());
+            } catch (Throwable $e) {
+                $this->components->error("{$label} check failed: {$e->getMessage()}");
+
+                return false;
+            }
+        }
+
+        if (! $this->option('subscribe')) {
+            $this->components->info("{$label} check passed.");
+
+            return true;
+        }
+
+        return $this->subscribe($form, $integration, $to, $label);
+    }
+
+    private function subscribe(FormContract $form, Integration $integration, string $to, string $label): bool
+    {
+        if (! $integration->canSubscribe()) {
+            $this->components->warn("{$label} check passed. It has no canaryContact and canaryDelete methods, so --subscribe was skipped.");
+
+            return true;
+        }
+
+        $listener = $integration->listener();
+
+        try {
+            // Deleting an address that was already a contact would remove a real subscription.
+            if ($listener->canaryContact($form->handle(), $to)) {
+                $this->components->error("{$label}: {$to} is already a contact, so Canary won't add and delete it. Use a --to address that isn't a contact.");
+
+                return false;
+            }
+
+            $integration->run((new TestSubmission)->form($form)->data($this->sampleData($form, $to, clientFacing: true)));
+
+            if (! $id = $listener->canaryContact($form->handle(), $to)) {
+                $this->components->error("{$label}: the test contact never arrived. Check the site's logs, as the listener's own checks, such as a rate limit, may have stopped it.");
+
+                return false;
+            }
+        } catch (Throwable $e) {
+            $this->components->error("{$label} subscribe failed: {$e->getMessage()}");
+
+            return false;
+        }
+
+        try {
+            $listener->canaryDelete($form->handle(), $id);
+        } catch (Throwable $e) {
+            $this->components->error("{$label}: added test contact {$id} but couldn't delete it, so delete it by hand. {$e->getMessage()}");
+
+            return false;
+        }
+
+        $this->components->info("{$label} check passed. Test contact added and deleted.");
 
         return true;
     }
@@ -182,7 +300,18 @@ class FormsCommand extends Command
         return isset($emails['to']) ? [$emails] : $emails;
     }
 
-    private function sampleValue(Field $field, string $to): mixed
+    /**
+     * Client-facing data ends up in the client's own systems, where Canary means nothing.
+     */
+    private function sampleData(FormContract $form, string $to, bool $clientFacing = false): array
+    {
+        return $form->blueprint()->fields()->all()
+            ->mapWithKeys(fn (Field $field) => [$field->handle() => $this->sampleValue($field, $to, $clientFacing)])
+            ->filter(fn ($value) => ! is_null($value))
+            ->all();
+    }
+
+    private function sampleValue(Field $field, string $to, bool $clientFacing = false): mixed
     {
         $options = $field->get('options') ?? [];
 
@@ -196,8 +325,8 @@ class FormsCommand extends Command
             $field->type() === 'date' => now()->toDateString(),
             $field->type() === 'checkboxes' => [$this->firstOption($options)],
             filled($options) => $this->firstOption($options),
-            $field->type() === 'textarea' => 'Sent by Canary. Please ignore.',
-            default => 'Test',
+            $field->type() === 'textarea' => $clientFacing ? 'TEST form submission. Please ignore.' : 'Sent by Canary. Please ignore.',
+            default => $clientFacing ? 'TEST form submission' : 'Test',
         };
     }
 

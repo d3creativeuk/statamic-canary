@@ -155,12 +155,12 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
-    public function a_form_with_no_emails_warns_but_doesnt_fail()
+    public function a_form_with_nothing_to_test_warns_but_doesnt_fail()
     {
         $this->makeForm('newsletter');
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain('newsletter sends no emails, so there is nothing to test.')
+            ->expectsOutputToContain('newsletter has no emails or integrations, so there is nothing to test.')
             ->assertSuccessful();
 
         Mail::assertNothingSent();
@@ -246,7 +246,7 @@ class FormsCommandTest extends TestCase
             ->expectsChoice(
                 'Which forms should Canary test? 3 forms found.',
                 ['quote'],
-                ['contact', 'quote', 'newsletter', 'contact', 'quote', 'newsletter - sends no emails'],
+                ['contact', 'quote', 'newsletter', 'contact - emails', 'quote - emails', 'newsletter - no emails or integrations found'],
             )
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->expectsOutputToContain('1 email(s) for quote dispatched')
@@ -264,7 +264,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('quote', [self::CLIENT_EMAIL]);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
             ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
             ->expectsOutputToContain('Saved. Run with --pick to choose again.')
             ->assertSuccessful();
@@ -286,7 +286,7 @@ class FormsCommandTest extends TestCase
         $this->saveForms(['quote']);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['contact'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['contact'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
             ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
             ->expectsOutputToContain('1 email(s) for contact dispatched')
             ->assertSuccessful();
@@ -317,7 +317,7 @@ class FormsCommandTest extends TestCase
 
         // An unexpected confirmation would fail the test.
         $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact', 'quote'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
             ->expectsOutputToContain('1 email(s) for quote dispatched')
             ->assertSuccessful();
 
@@ -392,6 +392,13 @@ class FormsCommandTest extends TestCase
             'textarea' => [['type' => 'textarea'], 'Sent by Canary. Please ignore.'],
             'text' => [['type' => 'text'], 'Test'],
         ];
+    }
+
+    #[Test]
+    public function client_facing_samples_dont_mention_canary()
+    {
+        $this->assertSame('TEST form submission. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com', true));
+        $this->assertSame('TEST form submission', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'text']), 'me@example.com', true));
     }
 
     #[Test]

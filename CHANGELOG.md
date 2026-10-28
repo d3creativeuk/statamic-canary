@@ -6,6 +6,28 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Added
+
+- **Integration checks.** A form listener, such as one that adds people to MailerLite or
+  ActiveCampaign, can tell Canary which forms and fields it handles through plain methods
+  (`canaryForms()`, `canaryName()`, `canaryCheck()`), with no dependency on Canary.
+  `canary:forms` then checks each one is registered, the form still has the fields it reads,
+  and a read-only API call succeeds. Listeners in `app/Listeners` that have the methods but
+  aren't registered are reported.
+- **`--subscribe`** runs each integration's listener alone with a test submission, checks the
+  contact arrived, then deletes it. It needs `canaryContact()` and `canaryDelete()`, and
+  refuses to run if the test address is already a contact.
+
+### Changed
+
+- **The form picker says what each form tests**, such as `contact - emails` or
+  `newsletter - emails, MailerLite`. Forms with nothing to test show
+  `no emails or integrations found` and are still listed last.
+- **A form with integrations but no emails is tested**, instead of warning that there's
+  nothing to test.
+
 ## [1.0.0] - 2026-10-23
 
 Initial release.

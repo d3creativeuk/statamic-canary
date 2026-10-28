@@ -1,6 +1,6 @@
 {
     "name": "d3creative/statamic-canary",
-    "description": "Canary by D3 Creative - checks a Statamic site's form emails still send, without saving a submission or emailing the client.",
+    "description": "Canary by D3 Creative - checks a Statamic site's form emails and integrations still work, without saving a submission or emailing the client.",
     "type": "statamic-addon",
     "license": "MIT",
     "authors": [
@@ -30,7 +30,7 @@
     "extra": {
         "statamic": {
             "name": "Canary",
-            "description": "Send a form's real emails to yourself through the queue, without saving a submission or running its integrations.",
+            "description": "Send a form's real emails to yourself through the queue and check its integrations, without saving a submission.",
             "developer": "D3 Creative",
             "developer_url": "https://d3creative.uk",
             "tags": [

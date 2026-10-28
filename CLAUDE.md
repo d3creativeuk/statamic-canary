@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Canary is a Statamic 6 addon with one Artisan command, `canary:forms`, that checks a live site's form emails still get delivered. It sends a form's real emails to one test address through the real queue, without saving a submission or running form listeners. Describe it as a **deliverability check**, not an email preview tool.
+Canary is a Statamic 6 addon with one Artisan command, `canary:forms`, that checks a live site's form emails still get delivered and its integrations still work. It sends a form's real emails to one test address through the real queue, without saving a submission or firing the form events. Describe it as a **deliverability check**, not an email preview tool.
 
 The `canary:` prefix leaves room for more checks. A scheduled or alerting mode and a Control Panel Utilities page may come later; neither is in v1.
+
+Everything stays in `canary:forms`: there's deliberately no separate integrations command, so one picker and one saved list cover both.
 
 There's no JavaScript. `src/ServiceProvider.php` only merges and publishes `config/canary.php` (tag `canary-config`). `AddonServiceProvider` registers commands in `src/Console/Commands` automatically.
 
@@ -25,6 +27,16 @@ A real submission (`Statamic\Http\Controllers\FormController`) does four things:
 
 Form handles come from the arguments, then `config('canary.forms')`, then the `forms` addon setting, then a Laravel Prompts `multiselect()` over `Form::all()` when the run is interactive. `--pick` skips the config and saved forms. After picking, the command offers to save the choice to the addon settings (`resources/addons/statamic-canary.yaml`); it doesn't offer when `canary.forms` is set, since the config would win anyway. The addon has no settings blueprint, so there's no Control Panel settings page. There's deliberately no `--all`: many sites have test or newsletter-only forms.
 
+## Integrations
+
+`src/Forms/Integration.php` finds form listeners that opt in by having a `canaryForms()` method. The other methods (`canaryName`, `canaryCheck`, `canaryContact`, `canaryDelete`) are optional; the class docblock lists their signatures. Canary checks for them with `method_exists()` and never ships an interface, so a site's listeners don't depend on Canary.
+
+- **Registered listeners** come from `Event::getRawListeners()` for `FormSubmitted` and `SubmissionCreated`, in all three formats: `Class`, `Class@method` and `[Class, method]`. Closures are skipped.
+- **Unregistered listeners** are found by scanning `app_path('Listeners')` with `app()->getNamespace()`, so a listener dropped from `EventServiceProvider` is reported. If the namespace can't be detected, the scan returns nothing.
+- **`--subscribe` runs one listener directly** (`Integration::run()`), never the event, so other listeners don't run. It passes a `TestSubmission`, whose `save()` does nothing, because real listeners save the submission (d3creative's `MailerLiteSubscriber` does), and that would store it and fire `SubmissionCreated`.
+- **Refuse to subscribe an address that's already a contact.** `canaryDelete()` would remove a real subscription.
+- **Client-facing sample data never says "Canary".** `sampleData(..., clientFacing: true)` uses "TEST form submission" for text and textareas, because it ends up in the client's own MailerLite or ActiveCampaign. Emails to the test address only reach a developer, so they keep "Sent by Canary. Please ignore."
+
 ## Tests
 
 ```bash
@@ -37,6 +49,7 @@ vendor/bin/phpunit
 - **Don't use `Bus::fake()`.** `BusFake` intercepts `dispatchSync`, so `SendEmails` never runs. Tests use the `sync` queue with `Mail::fake()` and assert on `Statamic\Forms\Email::getConfig()`, or `Queue::fake()` and assert on `SendEmail::$config`.
 - `Email` sets its recipients and subject in `build()`, so call `$mail->build()` before `hasTo()` or reading `subject`.
 - The picker test uses `expectsChoice()`; Laravel swaps Prompts for Symfony questions under unit tests.
+- `tests/Console/IntegrationsTest.php` uses `tests/Fixtures/FakeCrm.php`, a listener with an in-memory CRM. `useListenersIn('App')` points `app_path()` and the app namespace at `tests/Fixtures/App`, whose `Listeners` folder holds an unregistered listener.
 
 ## Manual checks
 
@@ -47,6 +60,8 @@ MAIL_MAILER=log php artisan canary:forms contact upgrade_form discover_drip nope
 ```
 
 Expect the test address and `TEST: ` subjects in `storage/logs/laravel.log`, a warning for `discover_drip`, an error for `nope`, and exit code 1. Then repeat with `QUEUE_CONNECTION=redis` and a `queue:work --stop-when-empty` worker: nothing is logged until the worker runs.
+
+d3creative's `MailerLiteSubscriber` has the Canary methods. Running `canary:forms statamic_alerts statamic_maintenance_drip` makes read-only MailerLite API calls. Only run `--subscribe` there when Stephen asks: those groups start automations.
 
 ## Marketplace metadata
 

@@ -197,9 +197,9 @@ class IntegrationsTest extends TestCase
         Event::listen(FormSubmitted::class, function () {});
 
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain(PlainListener::class.' listens for form submissions but has no Canary methods, so the forms it handles aren\'t tested.')
-            ->expectsOutputToContain(SendEmailVerificationNotification::class.' listens for form submissions. It comes from a package')
-            ->expectsOutputToContain("A closure listens for form submissions. Canary can't check it")
+            ->expectsOutputToContain(PlainListener::class.' has no Canary methods. See https://github.com/d3creativeuk/statamic-canary#checking-integrations')
+            ->expectsOutputToContain(SendEmailVerificationNotification::class." comes from a package, so Canary can't check it")
+            ->expectsOutputToContain("A closure listens for form submissions, so Canary can't check it")
             ->doesntExpectOutputToContain(FakeCrm::class)
             ->assertSuccessful();
     }

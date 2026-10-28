@@ -152,9 +152,9 @@ class FormsCommand extends Command
     {
         foreach (Integration::unconfigured() as $class) {
             $this->components->warn(match (true) {
-                $class === null => "A closure listens for form submissions. Canary can't check it, so the forms it handles aren't tested. Move it to a listener class with the Canary methods to check them.",
-                Integration::fromPackage($class) => "{$class} listens for form submissions. It comes from a package, so Canary can't check the forms it handles.",
-                default => "{$class} listens for form submissions but has no Canary methods, so the forms it handles aren't tested. Add the methods described at ".self::INTEGRATION_DOCS.' to check them.',
+                $class === null => "A closure listens for form submissions, so Canary can't check it",
+                Integration::fromPackage($class) => "{$class} comes from a package, so Canary can't check it",
+                default => "{$class} has no Canary methods. See ".self::INTEGRATION_DOCS,
             });
         }
     }

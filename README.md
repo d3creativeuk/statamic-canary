@@ -144,7 +144,7 @@ One listener can handle many forms, and one form can have several listeners. Can
 Canary never adds these methods for you: it doesn't change your code, and only you know where a listener keeps its form-to-list map and which field holds the email address. Until a listener has them, every run starts with a warning naming it:
 
 ```
-WARN  App\Listeners\ActiveCampaignSubscriber listens for form submissions but has no Canary methods, so the forms it handles aren't tested.
+WARN  App\Listeners\ActiveCampaignSubscriber has no Canary methods. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
 ```
 
 Its forms show `no emails or integrations found` in the list, because Canary can't see which ones it handles. Listeners from a package and closure listeners get their own warning, since you can't add methods to them.

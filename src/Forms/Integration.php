@@ -13,8 +13,8 @@ use Statamic\Events\SubmissionCreated;
 use Throwable;
 
 /**
- * A form listener that tells Canary about itself through plain methods, so the
- * site's code never depends on Canary:
+ * A form listener. It can tell Canary about itself through plain methods, so
+ * the site's code never depends on Canary:
  *
  *   canaryForms(): array                                 form handle => fields it reads (required)
  *   canaryName(): string                                 e.g. 'MailerLite'
@@ -22,7 +22,8 @@ use Throwable;
  *   canaryContact(string $form, string $email): ?string  the contact's ID in the account, or null
  *   canaryDelete(string $form, string $id): void         deletes that contact
  *
- * Only canaryForms() is required. The last two are needed for --subscribe.
+ * The last two are needed for --subscribe. Without canaryForms(), Canary reads
+ * the listener's code instead (ListenerSource), which can't give an API check.
  */
 class Integration
 {
@@ -34,6 +35,8 @@ class Integration
         public readonly string $method = 'handle',
     ) {}
 
+    private ?array $forms = null;
+
     /**
      * Listeners registered for a form event, plus any in app/Listeners that
      * aren't, so an unregistered one can be reported instead of missed.
@@ -44,27 +47,28 @@ class Integration
             ->flatMap(fn ($event) => collect(Event::getRawListeners()[$event] ?? [])
                 ->map(fn ($listener) => self::parse($listener, $event))
                 ->filter())
-            ->filter(fn (self $integration) => method_exists($integration->class, 'canaryForms'))
             ->keyBy('class');
 
         $unregistered = collect(self::appListeners())
             ->reject(fn ($class) => $registered->has($class))
-            ->filter(fn ($class) => method_exists($class, 'canaryForms'))
             ->map(fn ($class) => new self($class));
 
-        return $registered->values()->merge($unregistered);
+        return $registered->values()
+            ->merge($unregistered)
+            ->filter(fn (self $integration) => $integration->knownForms())
+            ->values();
     }
 
     /**
-     * Form listeners without canaryForms(), so Canary can't know which forms
-     * they handle. A closure is listed as null.
+     * Form listeners whose forms Canary can't find, from their methods or their
+     * code. A closure is listed as null.
      */
-    public static function unconfigured(): Collection
+    public static function unknown(): Collection
     {
         return collect(self::EVENTS)
             ->flatMap(fn ($event) => collect(Event::getRawListeners()[$event] ?? [])
                 ->map(fn ($listener) => self::parse($listener, $event)))
-            ->reject(fn (?self $integration) => $integration && method_exists($integration->class, 'canaryForms'))
+            ->reject(fn (?self $integration) => $integration?->knownForms())
             ->map(fn (?self $integration) => $integration?->class)
             ->unique()
             ->values();
@@ -84,25 +88,41 @@ class Integration
 
     public function name(): string
     {
-        return method_exists($this->class, 'canaryName')
-            ? $this->listener()->canaryName()
-            : class_basename($this->class);
+        if (method_exists($this->class, 'canaryName')) {
+            return $this->listener()->canaryName();
+        }
+
+        return $this->configured() ? class_basename($this->class) : (ListenerSource::fromClass($this->class)->service() ?? class_basename($this->class));
     }
 
+    /**
+     * Form handle => fields the listener reads.
+     */
     public function forms(): array
     {
-        return collect($this->listener()->canaryForms())
-            ->mapWithKeys(fn ($fields, $form) => is_int($form) ? [$fields => []] : [$form => Arr::wrap($fields)])
-            ->all();
+        return $this->forms ??= $this->configured()
+            ? collect($this->listener()->canaryForms())
+                ->mapWithKeys(fn ($fields, $form) => is_int($form) ? [$fields => []] : [$form => Arr::wrap($fields)])
+                ->all()
+            : ListenerSource::fromClass($this->class)->forms();
     }
 
     public function handles(string $form): bool
     {
-        try {
-            return array_key_exists($form, $this->forms());
-        } catch (Throwable) {
-            return false;
-        }
+        return array_key_exists($form, $this->knownForms());
+    }
+
+    /**
+     * Whether the listener has the Canary methods, rather than Canary reading its code.
+     */
+    public function configured(): bool
+    {
+        return method_exists($this->class, 'canaryForms');
+    }
+
+    public function hasApiCheck(): bool
+    {
+        return method_exists($this->class, 'canaryCheck');
     }
 
     public function registered(): bool
@@ -113,6 +133,15 @@ class Integration
     public function canSubscribe(): bool
     {
         return method_exists($this->class, 'canaryContact') && method_exists($this->class, 'canaryDelete');
+    }
+
+    private function knownForms(): array
+    {
+        try {
+            return $this->forms();
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     public function listener(): object

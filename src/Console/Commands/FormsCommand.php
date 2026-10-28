@@ -63,7 +63,7 @@ class FormsCommand extends Command
             return self::FAILURE;
         }
 
-        $this->warnAboutUnconfiguredListeners();
+        $this->warnAboutUnknownListeners();
 
         if (! $handles = $this->handles()) {
             return self::FAILURE;
@@ -146,15 +146,15 @@ class FormsCommand extends Command
     }
 
     /**
-     * Without the Canary methods, a listener's forms would look like they have no integrations.
+     * Otherwise these listeners' forms would look like they have no integrations.
      */
-    private function warnAboutUnconfiguredListeners(): void
+    private function warnAboutUnknownListeners(): void
     {
-        foreach (Integration::unconfigured() as $class) {
+        foreach (Integration::unknown() as $class) {
             $this->components->warn(match (true) {
                 $class === null => "A closure listens for form submissions, so Canary can't check it",
                 Integration::fromPackage($class) => "{$class} comes from a package, so Canary can't check it",
-                default => "{$class} has no Canary methods. See ".self::INTEGRATION_DOCS,
+                default => "Canary can't tell which forms {$class} handles. See ".self::INTEGRATION_DOCS,
             });
         }
     }
@@ -171,9 +171,19 @@ class FormsCommand extends Command
     {
         return collect($this->emailConfigs($form) ? ['emails'] : [])
             ->merge($this->integrations($form->handle())->map(
-                fn (Integration $integration) => $integration->name().($integration->registered() ? '' : ' (not registered)')
+                fn (Integration $integration) => $integration->name().$this->notes($integration)
             ))
             ->all();
+    }
+
+    private function notes(Integration $integration): string
+    {
+        $notes = array_filter([
+            $integration->registered() ? null : 'not registered',
+            $integration->hasApiCheck() ? null : 'no API check',
+        ]);
+
+        return $notes ? ' ('.implode(', ', $notes).')' : '';
     }
 
     private function testForm(string $handle, string $to, SiteObject $site): bool
@@ -248,7 +258,7 @@ class FormsCommand extends Command
             return false;
         }
 
-        if (method_exists($integration->class, 'canaryCheck')) {
+        if ($integration->hasApiCheck()) {
             try {
                 $integration->listener()->canaryCheck($form->handle());
             } catch (Throwable $e) {
@@ -258,19 +268,21 @@ class FormsCommand extends Command
             }
         }
 
-        if (! $this->option('subscribe')) {
-            $this->components->info("{$label} check passed.");
-
-            return true;
+        if ($this->option('subscribe')) {
+            return $this->subscribe($form, $integration, $to, $label);
         }
 
-        return $this->subscribe($form, $integration, $to, $label);
+        $integration->hasApiCheck()
+            ? $this->components->info("{$label} check passed.")
+            : $this->components->warn("{$label} found, but there's no API check. See ".self::INTEGRATION_DOCS);
+
+        return true;
     }
 
     private function subscribe(FormContract $form, Integration $integration, string $to, string $label): bool
     {
         if (! $integration->canSubscribe()) {
-            $this->components->warn("{$label} check passed. It has no canaryContact and canaryDelete methods, so --subscribe was skipped.");
+            $this->components->warn("{$label}: --subscribe skipped, as it has no canaryContact and canaryDelete methods.");
 
             return true;
         }

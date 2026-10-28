@@ -3,6 +3,7 @@
 namespace D3Creative\Canary\Tests\Console;
 
 use D3Creative\Canary\Tests\Fixtures\App\Listeners\PlainListener;
+use D3Creative\Canary\Tests\Fixtures\ContactToActiveCampaign;
 use D3Creative\Canary\Tests\Fixtures\FakeCrm;
 use D3Creative\Canary\Tests\TestCase;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
@@ -25,6 +26,7 @@ class IntegrationsTest extends TestCase
         config(['queue.default' => 'sync']);
         Mail::fake();
         FakeCrm::reset();
+        ContactToActiveCampaign::$received = [];
         Event::listen(FormSubmitted::class, FakeCrm::class);
     }
 
@@ -41,7 +43,7 @@ class IntegrationsTest extends TestCase
             ->expectsChoice('Which forms should Canary test? 4 forms found.', ['quote'], [
                 'contact', 'newsletter', 'quote', 'old',
                 'contact - emails, FakeCRM',
-                'newsletter - FakeCRM, ForgottenCRM (not registered)',
+                'newsletter - FakeCRM, ForgottenCRM (not registered, no API check)',
                 'quote - emails',
                 'old - no emails or integrations found',
             ])
@@ -184,7 +186,7 @@ class IntegrationsTest extends TestCase
         Event::listen(FormSubmitted::class, 'D3Creative\Canary\Tests\Fixtures\App\Listeners\ForgottenCrm@handle');
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--subscribe' => true])
-            ->expectsOutputToContain('newsletter: ForgottenCRM check passed. It has no canaryContact and canaryDelete methods, so --subscribe was skipped.')
+            ->expectsOutputToContain('newsletter: ForgottenCRM: --subscribe skipped, as it has no canaryContact and canaryDelete methods.')
             ->assertSuccessful();
     }
 
@@ -197,11 +199,40 @@ class IntegrationsTest extends TestCase
         Event::listen(FormSubmitted::class, function () {});
 
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain(PlainListener::class.' has no Canary methods. See https://github.com/d3creativeuk/statamic-canary#checking-integrations')
+            ->expectsOutputToContain("Canary can't tell which forms ".PlainListener::class.' handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations')
             ->expectsOutputToContain(SendEmailVerificationNotification::class." comes from a package, so Canary can't check it")
             ->expectsOutputToContain("A closure listens for form submissions, so Canary can't check it")
             ->doesntExpectOutputToContain(FakeCrm::class)
             ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_finds_a_listeners_forms_from_its_code()
+    {
+        $this->makeForm('contact', [self::EMAIL]);
+        Event::listen(FormSubmitted::class, ContactToActiveCampaign::class);
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com'])
+            ->expectsChoice('Which forms should Canary test? 1 form found.', ['contact'], [
+                'contact', 'contact - emails, FakeCRM, ActiveCampaign (no API check)',
+            ])
+            ->expectsConfirmation('Save these as the forms to test next time?', 'no')
+            ->expectsOutputToContain("contact: ActiveCampaign found, but there's no API check.")
+            ->doesntExpectOutputToContain("Canary can't tell")
+            ->assertSuccessful();
+
+        $this->assertSame([], ContactToActiveCampaign::$received);
+    }
+
+    #[Test]
+    public function it_checks_fields_found_in_a_listeners_code()
+    {
+        $this->makeForm('contact', [self::EMAIL], [['handle' => 'full_name', 'field' => ['type' => 'text']]]);
+        Event::listen(FormSubmitted::class, ContactToActiveCampaign::class);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("contact: ActiveCampaign reads business_email, which isn't a field on the form.")
+            ->assertFailed();
     }
 
     /**

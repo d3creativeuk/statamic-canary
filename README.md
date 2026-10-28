@@ -141,13 +141,30 @@ class MailerLiteSubscriber
 
 One listener can handle many forms, and one form can have several listeners. Canary checks each listener for each form.
 
-Canary never adds these methods for you: it doesn't change your code, and only you know where a listener keeps its form-to-list map and which field holds the email address. Until a listener has them, every run starts with a warning naming it:
+### Without the methods
+
+Canary never adds these methods for you: it doesn't change your code. Without them, Canary reads the listener's code to find the forms it handles, so a site works out of the box. It recognises the usual ways a listener picks its forms:
+
+```php
+if ($event->submission->form()->handle() == 'contact')
+if (in_array($event->submission->form()->handle(), ['contact', 'quote']))
+if ($submission->form()->handle() !== config('acorn.form'))
+$groupId = $this->groups[$event->submission->form()->handle()] ?? null;
+```
+
+It also finds the fields a listener reads (`$submission->email` or `$submission->get('email')`) when it handles a single form, and the service's name when the code mentions one, such as ActiveCampaign or MailerLite. The list then shows:
 
 ```
-WARN  App\Listeners\ActiveCampaignSubscriber has no Canary methods. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
+contact - emails, ActiveCampaign (no API check)
 ```
 
-Its forms show `no emails or integrations found` in the list, because Canary can't see which ones it handles. Listeners from a package and closure listeners get their own warning, since you can't add methods to them.
+That's enough to check the listener is registered and the form still has its fields. The API check needs `canaryCheck()`, because only the listener knows the API key and the list. If Canary can't work out a listener's forms at all, every run starts with a warning naming it:
+
+```
+WARN  Canary can't tell which forms App\Listeners\ActiveCampaignSubscriber handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
+```
+
+Listeners from a package and closure listeners get their own warning, since you can't add methods to them.
 
 For each integration on a form, a normal run checks that:
 
@@ -196,7 +213,7 @@ On a site you don't know, check for these before running Canary, or run it with 
 
 ## What Canary doesn't check
 
-- **Listeners without the Canary methods.** Canary can't see which forms they handle, so it warns about them but doesn't test them.
+- **The API, for listeners without `canaryCheck()`.** Canary can still find their forms and fields from their code, but only the listener knows how to reach the service.
 - **Integrations that aren't listeners**, such as a webhook from a third-party addon.
 - **Validation.** Sample values only need to render in a template. Canary tests the email path, not the form.
 - **The inbox.** Canary proves the email jobs were dispatched. Checking that they arrived is up to you.

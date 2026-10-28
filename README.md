@@ -27,8 +27,23 @@ Requires Statamic 6 and PHP 8.3+.
 ## Usage
 
 ```bash
-php artisan canary:forms {forms?*} {--to=} {--site=} {--pick} {--subscribe}
+# Pick forms from a list, and optionally save them for next time
+php artisan canary:forms --to=you@example.com
+
+# Test the contact and quote forms
+php artisan canary:forms contact quote --to=you@example.com
+
+# Choose again, ignoring the saved forms
+php artisan canary:forms --pick
+
+# Send as the French site on a multisite
+php artisan canary:forms contact --site=fr
+
+# Also add the test address to each integration, then delete it
+php artisan canary:forms newsletter --subscribe
 ```
+
+The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#setting-defaults).
 
 | | |
 |---|---|

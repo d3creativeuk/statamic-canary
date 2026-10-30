@@ -109,7 +109,14 @@ class FormsCommand extends Command
     {
         $mailer = config('mail.default');
         $transport = config("mail.mailers.{$mailer}.transport", $mailer);
-        $name = "the {$mailer} mailer".($transport !== $mailer ? " ({$transport})" : '');
+
+        // smtp alone could be a mail provider or a local catcher such as Herd's, so say where it connects.
+        $details = array_filter([
+            $transport !== $mailer ? $transport : null,
+            $transport === 'smtp' ? $this->smtpServer($mailer) : null,
+        ]);
+
+        $name = "the {$mailer} mailer".($details ? ' ('.implode(', ', $details).')' : '');
 
         if (in_array($transport, ['log', 'array'])) {
             $this->components->warn("Emails send with {$name}, so they're never delivered. Set MAIL_MAILER to test delivery.");
@@ -118,6 +125,14 @@ class FormsCommand extends Command
         }
 
         $this->components->info("Emails send with {$name}.");
+    }
+
+    private function smtpServer(string $mailer): ?string
+    {
+        $host = config("mail.mailers.{$mailer}.host");
+        $port = config("mail.mailers.{$mailer}.port");
+
+        return $host ? $host.($port ? ":{$port}" : '') : null;
     }
 
     private function handles(): array
@@ -313,9 +328,12 @@ class FormsCommand extends Command
             return $this->subscribe($form, $integration, $to, $label);
         }
 
-        $integration->hasApiCheck()
-            ? $this->components->info("{$label} check passed.")
-            : $this->components->warn("{$label} found, but there's no API check. See ".self::INTEGRATION_DOCS);
+        match (true) {
+            $integration->hasApiCheck() => $this->components->info("{$label} check passed."),
+            // The site can't add methods to a package's listener, so there's nothing to point it at.
+            Integration::fromPackage($integration->class) => $this->components->info("{$label} check passed. It comes from a package, so only its registration and fields were checked."),
+            default => $this->components->warn("{$label} found, but there's no API check. See ".self::INTEGRATION_DOCS),
+        };
 
         return true;
     }

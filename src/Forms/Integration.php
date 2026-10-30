@@ -79,11 +79,29 @@ class Integration
      */
     public static function fromPackage(string $class): bool
     {
-        $file = (new ReflectionClass($class))->getFileName();
-
         // Keyed by each vendor directory. Herd preloads its own loader, so ClassLoader's own path can't be used.
-        return collect(array_keys(ClassLoader::getRegisteredLoaders()))
-            ->contains(fn ($vendor) => str_starts_with($file, $vendor.DIRECTORY_SEPARATOR));
+        // findFile() keeps the vendor path of a symlinked path repository, which Reflection resolves away.
+        return collect(ClassLoader::getRegisteredLoaders())
+            ->contains(fn (ClassLoader $loader, string $vendor) => ($file = $loader->findFile($class))
+                && str_starts_with(self::withoutDotSegments($file), self::withoutDotSegments($vendor).'/'));
+    }
+
+    /**
+     * Composer maps paths as vendor/composer/../.., so collapse those without resolving symlinks.
+     */
+    private static function withoutDotSegments(string $path): string
+    {
+        $parts = [];
+
+        foreach (explode('/', str_replace('\\', '/', $path)) as $part) {
+            match ($part) {
+                '..' => array_pop($parts),
+                '.' => null,
+                default => $parts[] = $part,
+            };
+        }
+
+        return implode('/', $parts);
     }
 
     public function name(): string

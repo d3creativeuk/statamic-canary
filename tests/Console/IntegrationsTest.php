@@ -2,12 +2,14 @@
 
 namespace D3Creative\Canary\Tests\Console;
 
+use Composer\Autoload\ClassLoader;
 use D3Creative\Canary\Tests\Fixtures\App\Listeners\PlainListener;
 use D3Creative\Canary\Tests\Fixtures\ContactToActiveCampaign;
 use D3Creative\Canary\Tests\Fixtures\FakeCrm;
 use D3Creative\Canary\Tests\TestCase;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionProperty;
@@ -233,6 +235,33 @@ class IntegrationsTest extends TestCase
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
             ->expectsOutputToContain("contact: ActiveCampaign reads business_email, which isn't a field on the form.")
             ->assertFailed();
+    }
+
+    #[Test]
+    public function a_package_listener_isnt_sent_to_the_docs()
+    {
+        // As a path repository installs it: vendor/acme/crm is a symlink, and
+        // Composer maps it as vendor/composer/../acme/crm.
+        $vendor = dirname(__DIR__).'/__fixtures__/tmp/vendor';
+        File::ensureDirectoryExists($vendor.'/composer');
+        File::ensureDirectoryExists($vendor.'/acme');
+        symlink(dirname(__DIR__).'/Fixtures/Packages/acme-crm', $vendor.'/acme/crm');
+
+        $loader = new ClassLoader($vendor);
+        $loader->addPsr4('Acme\\Crm\\', $vendor.'/composer/../acme/crm/src');
+        $loader->register();
+
+        try {
+            $this->makeForm('contact', [self::EMAIL]);
+            Event::listen(FormSubmitted::class, 'Acme\Crm\SyncToAcme');
+
+            $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+                ->expectsOutputToContain('contact: SyncToAcme check passed. It comes from a package, so only its registration and fields were checked.')
+                ->doesntExpectOutputToContain('SyncToAcme found')
+                ->assertSuccessful();
+        } finally {
+            $loader->unregister();
+        }
     }
 
     /**

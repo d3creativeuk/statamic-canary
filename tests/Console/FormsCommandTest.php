@@ -253,6 +253,17 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_says_where_the_smtp_mailer_connects()
+    {
+        config(['mail.default' => 'smtp', 'mail.mailers.smtp.host' => '127.0.0.1', 'mail.mailers.smtp.port' => 2525]);
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Emails send with the smtp mailer (127.0.0.1:2525).')
+            ->assertSuccessful();
+    }
+
+    #[Test]
     public function it_names_a_mailer_set_on_the_form()
     {
         $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'mailer' => 'array']]);

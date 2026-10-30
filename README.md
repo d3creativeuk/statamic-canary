@@ -114,7 +114,7 @@ The command exits non-zero if a form doesn't exist, its emails fail to dispatch 
 
 Canary names the queue connection and queue the emails go on, so you know which worker has to run them. If the connection is `sync`, it warns you instead: the templates and sender are tested, but no queue worker is.
 
-It also names the mailer, and the form's own mailer when an email sets one. If the mailer is `log` or `array`, Canary warns you that nothing is delivered.
+It also names the mailer, and the form's own mailer when an email sets one. For `smtp` it adds the server, such as `127.0.0.1:2525`, so you can tell a mail provider from a local catcher like Herd's. If the mailer is `log` or `array`, Canary warns you that nothing is delivered.
 
 ## Checking integrations
 
@@ -273,7 +273,7 @@ That's enough to check the listener is registered and the form still has its fie
 WARN  Canary can't tell which forms App\Listeners\ActiveCampaignSubscriber handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
 ```
 
-Listeners from a package and closure listeners get their own warning, since you can't add methods to them.
+Listeners from a package and closure listeners get their own warning, since you can't add methods to them. When Canary does find a package listener's forms, it checks the registration and fields and says so, without pointing you here.
 
 For each integration on a form, a normal run checks that:
 

@@ -68,9 +68,11 @@ A notification goes to a fixed address, usually your own inbox. An auto-reply go
 
 Forms with nothing to test are listed last. Canary never tests every form on its own: many sites have test forms you won't want to send.
 
-![Canary's form picker listing a site's forms, with the forms that have nothing to test at the bottom](art/canary-picker.png)
+![Canary's form picker listing a site's forms and what it will test in each](art/canary-picker.png)
 
 After you pick, Canary asks whether to save your choice. If you say yes, later runs test the saved forms without showing the list, including non-interactive runs such as deploy scripts. Run `canary:forms --pick` to choose again.
+
+![Canary asking whether to save the picked forms for next time](art/canary-save.png)
 
 Saved forms are stored in `resources/addons/statamic-canary.yaml`. Save them on your local copy and commit the file, so every environment tests the same forms.
 
@@ -109,6 +111,10 @@ For each form, Canary builds an unsaved submission filled with sample values fro
 Everything else, including the template, `from`, `reply_to` and `mailer`, is unchanged. Email fields are filled with your test address, so automatic replies to the visitor come back to you too. Text fields get `Test`, so a subject like `{{ full_name }} submitted the contact form.` arrives as "TEST: Test submitted the contact form."
 
 These changes are made to a copy of the form's settings in memory, never to the form itself. See [Canary doesn't change your site](#canary-doesnt-change-your-site).
+
+A run starts by naming the queue connection and mailer, then reports each form's emails and integration checks:
+
+![A Canary run naming the queue and mailer, then reporting each form's emails and integration checks](art/canary-run.png)
 
 ### Exit codes
 

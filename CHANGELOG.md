@@ -32,8 +32,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 
 ### Changed
 
-- **The form picker says what each form tests**, such as `contact - emails` or
-  `newsletter - emails, MailerLite`. Forms with nothing to test show
+- **The form picker says what each form tests**, such as `contact - notification email` or
+  `newsletter - auto-reply email, MailerLite`. Forms with nothing to test show
   `no emails or integrations found` and are still listed last.
 - **A form with integrations but no emails is tested**, instead of warning that there's
   nothing to test.

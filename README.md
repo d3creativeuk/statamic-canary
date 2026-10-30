@@ -58,11 +58,13 @@ The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#s
 If you run `canary:forms` with no handles, Canary lists every form on the site and you tick the ones to test. Each form shows what Canary will test in it:
 
 ```
-contact - emails
-statamic_alerts - emails, MailerLite
-newsletter - MailerLite
+contact - notification email
+quote - notification and auto-reply emails
+newsletter - auto-reply email, MailerLite
 old_form - no emails or integrations found
 ```
+
+A notification goes to a fixed address, usually your own inbox. An auto-reply goes to the visitor, through a field such as `{{ email }}`. Canary sends both kinds to your test address.
 
 Forms with nothing to test are listed last. Canary never tests every form on its own: many sites have test forms you won't want to send.
 
@@ -264,7 +266,7 @@ $groupId = $this->groups[$event->submission->form()->handle()] ?? null;
 It also finds the fields a listener reads (`$submission->email` or `$submission->get('email')`) when it handles a single form, and the service's name when the code mentions one, such as ActiveCampaign or MailerLite. The list then shows:
 
 ```
-contact - emails, ActiveCampaign (no API check)
+contact - notification email, ActiveCampaign (no API check)
 ```
 
 That's enough to check the listener is registered and the form still has its fields. The API check needs `canaryCheck()`, because only the listener knows the API key and the list. If Canary can't work out a listener's forms at all, every run starts with a warning naming it:

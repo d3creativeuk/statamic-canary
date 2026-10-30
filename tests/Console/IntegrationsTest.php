@@ -44,9 +44,9 @@ class IntegrationsTest extends TestCase
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
             ->expectsChoice('Which forms should Canary test? 4 forms found.', ['quote'], [
                 'contact', 'newsletter', 'quote', 'old',
-                'contact - emails, FakeCRM',
+                'contact - notification email, FakeCRM',
                 'newsletter - FakeCRM, ForgottenCRM (not registered, no API check)',
-                'quote - emails',
+                'quote - notification email',
                 'old - no emails or integrations found',
             ])
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
@@ -216,7 +216,7 @@ class IntegrationsTest extends TestCase
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
             ->expectsChoice('Which forms should Canary test? 1 form found.', ['contact'], [
-                'contact', 'contact - emails, FakeCRM, ActiveCampaign (no API check)',
+                'contact', 'contact - notification email, FakeCRM, ActiveCampaign (no API check)',
             ])
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->expectsOutputToContain("contact: ActiveCampaign found, but there's no API check.")

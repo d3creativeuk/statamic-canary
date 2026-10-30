@@ -301,20 +301,27 @@ class FormsCommandTest extends TestCase
     {
         $this->makeForm('contact', [self::CLIENT_EMAIL]);
         $this->makeForm('newsletter');
-        $this->makeForm('quote', [self::CLIENT_EMAIL]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL, [...self::CLIENT_EMAIL, 'to' => '{{ business_email }}']]);
+        $this->makeForm('reply', [[...self::CLIENT_EMAIL, 'to' => '{{ business_email }}']]);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
             ->expectsChoice(
-                'Which forms should Canary test? 3 forms found.',
+                'Which forms should Canary test? 4 forms found.',
                 ['quote'],
-                ['contact', 'quote', 'newsletter', 'contact - emails', 'quote - emails', 'newsletter - no emails or integrations found'],
+                [
+                    'contact', 'quote', 'reply', 'newsletter',
+                    'contact - notification email',
+                    'quote - notification and auto-reply emails',
+                    'reply - auto-reply email',
+                    'newsletter - no emails or integrations found',
+                ],
             )
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
-            ->expectsOutputToContain('1 email(s) for quote dispatched')
+            ->expectsOutputToContain('2 email(s) for quote dispatched')
             ->doesntExpectOutputToContain('for contact')
             ->assertSuccessful();
 
-        Mail::assertSent(Email::class, 1);
+        Mail::assertSent(Email::class, 2);
         $this->assertFileDoesNotExist($this->settingsPath());
     }
 
@@ -325,7 +332,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('quote', [self::CLIENT_EMAIL]);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - notification email', 'quote - notification email'])
             ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
             ->expectsOutputToContain('Saved. Run with --pick to choose again.')
             ->assertSuccessful();
@@ -347,7 +354,7 @@ class FormsCommandTest extends TestCase
         $this->saveForms(['quote']);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['contact'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['contact'], ['contact', 'quote', 'contact - notification email', 'quote - notification email'])
             ->expectsConfirmation('Save these as the forms to test next time?', 'yes')
             ->expectsOutputToContain('1 email(s) for contact dispatched')
             ->assertSuccessful();
@@ -378,7 +385,7 @@ class FormsCommandTest extends TestCase
 
         // An unexpected confirmation would fail the test.
         $this->artisan('canary:forms', ['--to' => 'me@example.com', '--pick' => true])
-            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - emails', 'quote - emails'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['quote'], ['contact', 'quote', 'contact - notification email', 'quote - notification email'])
             ->expectsOutputToContain('1 email(s) for quote dispatched')
             ->assertSuccessful();
 

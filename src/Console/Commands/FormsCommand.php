@@ -222,11 +222,33 @@ class FormsCommand extends Command
      */
     private function tests(FormContract $form): array
     {
-        return collect($this->emailConfigs($form) ? ['emails'] : [])
+        return collect([$this->emailKinds($form)])
+            ->filter()
             ->merge($this->integrations($form->handle())->map(
                 fn (Integration $integration) => $integration->name().$this->notes($integration)
             ))
             ->all();
+    }
+
+    /**
+     * An email to a field, such as {{ email }}, goes to the visitor. Any other
+     * address is the site's own inbox.
+     */
+    private function emailKinds(FormContract $form): ?string
+    {
+        $emails = $this->emailConfigs($form);
+
+        if (! $emails) {
+            return null;
+        }
+
+        $kinds = collect($emails)
+            ->map(fn ($email) => str_contains(implode(',', Arr::wrap($email['to'] ?? '')), '{{') ? 'auto-reply' : 'notification')
+            ->unique()
+            ->sortBy(fn ($kind) => $kind === 'auto-reply')
+            ->implode(' and ');
+
+        return $kinds.(count($emails) === 1 ? ' email' : ' emails');
     }
 
     private function notes(Integration $integration): string

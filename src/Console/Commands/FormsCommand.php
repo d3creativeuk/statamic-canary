@@ -70,6 +70,7 @@ class FormsCommand extends Command
         }
 
         $this->reportQueue();
+        $this->reportMailer();
 
         $failed = false;
 
@@ -99,6 +100,24 @@ class FormsCommand extends Command
         $where = ($queue ? "the {$queue} queue of " : '')."the {$connection} connection".($driver !== $connection ? " ({$driver})" : '');
 
         $this->components->info("Emails go on {$where}, so they only send when a queue worker runs.");
+    }
+
+    /**
+     * The default mailer. A form email with its own mailer is named when it's dispatched.
+     */
+    private function reportMailer(): void
+    {
+        $mailer = config('mail.default');
+        $transport = config("mail.mailers.{$mailer}.transport", $mailer);
+        $name = "the {$mailer} mailer".($transport !== $mailer ? " ({$transport})" : '');
+
+        if (in_array($transport, ['log', 'array'])) {
+            $this->components->warn("Emails send with {$name}, so they're never delivered. Set MAIL_MAILER to test delivery.");
+
+            return;
+        }
+
+        $this->components->info("Emails send with {$name}.");
     }
 
     private function handles(): array
@@ -253,7 +272,10 @@ class FormsCommand extends Command
             return false;
         }
 
-        $this->components->info(count($emails)." email(s) for {$form->handle()} dispatched to {$to}.");
+        $mailers = collect($emails)->pluck('mailer')->filter()->unique();
+
+        $this->components->info(count($emails)." email(s) for {$form->handle()} dispatched to {$to}"
+            .($mailers->isNotEmpty() ? ', using the form\'s '.$mailers->implode(', ').' mailer' : '').'.');
 
         return true;
     }

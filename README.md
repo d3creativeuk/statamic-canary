@@ -114,6 +114,8 @@ The command exits non-zero if a form doesn't exist, its emails fail to dispatch 
 
 Canary names the queue connection and queue the emails go on, so you know which worker has to run them. If the connection is `sync`, it warns you instead: the templates and sender are tested, but no queue worker is.
 
+It also names the mailer, and the form's own mailer when an email sets one. If the mailer is `log` or `array`, Canary warns you that nothing is delivered.
+
 ## Checking integrations
 
 Newsletter and CRM integrations are usually listeners on `FormSubmitted`. A listener decides which forms it handles in its own code, so Canary can't tell from outside which forms reach MailerLite. Running the listener to find out would add a real contact.

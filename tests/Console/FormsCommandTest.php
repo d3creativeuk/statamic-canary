@@ -44,7 +44,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('contact', [self::CLIENT_EMAIL, ['to' => 'sales@example.com']]);
 
         $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain('2 email(s) for contact dispatched to me@example.com.')
+            ->expectsOutputToContain("2 email(s) for contact dispatched to me@example.com, using the form's smtp mailer.")
             ->assertSuccessful();
 
         Mail::assertSent(Email::class, 2);
@@ -230,6 +230,39 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_warns_when_the_mailer_never_delivers()
+    {
+        config(['mail.default' => 'log']);
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("Emails send with the log mailer, so they're never delivered. Set MAIL_MAILER to test delivery.")
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_names_the_mailer()
+    {
+        config(['mail.default' => 'postmark-live', 'mail.mailers.postmark-live' => ['transport' => 'postmark']]);
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Emails send with the postmark-live mailer (postmark).')
+            ->doesntExpectOutputToContain('never delivered')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_names_a_mailer_set_on_the_form()
+    {
+        $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'mailer' => 'array']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("1 email(s) for contact dispatched to me@example.com, using the form's array mailer.")
+            ->assertSuccessful();
+    }
+
+    #[Test]
     public function it_falls_back_to_the_config()
     {
         config(['canary.to' => 'config@example.com', 'canary.forms' => ['contact']]);
@@ -237,7 +270,7 @@ class FormsCommandTest extends TestCase
         $this->makeForm('quote', [self::CLIENT_EMAIL]);
 
         $this->artisan('canary:forms')
-            ->expectsOutputToContain('1 email(s) for contact dispatched to config@example.com.')
+            ->expectsOutputToContain("1 email(s) for contact dispatched to config@example.com, using the form's smtp mailer.")
             ->doesntExpectOutputToContain('quote')
             ->assertSuccessful();
     }

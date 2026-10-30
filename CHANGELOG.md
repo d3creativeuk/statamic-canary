@@ -26,6 +26,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
   refuses to run if the test address is already a contact.
 - **Every run names the queue connection and queue** the emails go on, such as
   `the default queue of the redis connection`, so you know which worker has to run them.
+- **Every run names the mailer**, and warns when it's `log` or `array`. A form email with its
+  own `mailer` names it when it's dispatched.
 
 ### Changed
 

@@ -19,8 +19,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 - **Listeners without the methods are found from their code.** Canary recognises the usual
   ways a listener picks its forms (comparing the handle, `in_array()`, a handle-keyed array, or
   a handle from config) and finds the fields it reads and the service it names. Those forms are
-  checked for registration and fields, and listed as `(no API check)`. Every run warns about
-  form listeners whose forms still can't be found.
+  checked for registration and fields, and listed as `(no API check)`. A listener from a
+  package is named after its addon or package instead. Every run warns about form listeners
+  whose forms still can't be found.
 - **`--subscribe`** runs each integration's listener alone with a test submission, checks the
   contact arrived, then deletes it. It needs `canaryContact()` and `canaryDelete()`, and
   refuses to run if the test address is already a contact.

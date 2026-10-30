@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\File;
 use ReflectionClass;
 use Statamic\Events\FormSubmitted;
 use Statamic\Events\SubmissionCreated;
+use Statamic\Facades\Addon;
 use Throwable;
 
 /**
@@ -79,11 +80,39 @@ class Integration
      */
     public static function fromPackage(string $class): bool
     {
+        return self::packageOf($class) !== null;
+    }
+
+    /**
+     * The Composer package a class is installed from, such as d3creative/statamic-acorn.
+     */
+    private static function packageOf(string $class): ?string
+    {
         // Keyed by each vendor directory. Herd preloads its own loader, so ClassLoader's own path can't be used.
         // findFile() keeps the vendor path of a symlinked path repository, which Reflection resolves away.
-        return collect(ClassLoader::getRegisteredLoaders())
-            ->contains(fn (ClassLoader $loader, string $vendor) => ($file = $loader->findFile($class))
-                && str_starts_with(self::withoutDotSegments($file), self::withoutDotSegments($vendor).'/'));
+        foreach (ClassLoader::getRegisteredLoaders() as $vendor => $loader) {
+            $file = $loader->findFile($class);
+            $vendor = self::withoutDotSegments($vendor).'/';
+
+            if ($file && str_starts_with($file = self::withoutDotSegments($file), $vendor)) {
+                return implode('/', array_slice(explode('/', substr($file, strlen($vendor))), 0, 2));
+            }
+        }
+
+        return null;
+    }
+
+    public function package(): ?string
+    {
+        return self::packageOf($this->class);
+    }
+
+    /**
+     * The Statamic addon the listener comes from, if it's in one.
+     */
+    public function addon(): ?string
+    {
+        return ($package = $this->package()) ? Addon::get($package)?->name() : null;
     }
 
     /**
@@ -108,6 +137,10 @@ class Integration
     {
         if (method_exists($this->class, 'canaryName')) {
             return $this->listener()->canaryName();
+        }
+
+        if ($package = $this->package()) {
+            return $this->addon() ?? $package;
         }
 
         return $this->configured() ? class_basename($this->class) : (ListenerSource::fromClass($this->class)->service() ?? class_basename($this->class));

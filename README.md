@@ -281,7 +281,7 @@ That's enough to check the listener is registered and the form still has its fie
 WARN  Canary can't tell which forms App\Listeners\ActiveCampaignSubscriber handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
 ```
 
-Listeners from a package and closure listeners get their own warning, since you can't add methods to them. When Canary does find a package listener's forms, it checks the registration and fields and says so, without pointing you here.
+Listeners from a package and closure listeners get their own warning, since you can't add methods to them. When Canary does find a package listener's forms, it names the listener after its addon or package, such as `acorn - Acorn`, and checks the registration and fields without pointing you here.
 
 For each integration on a form, a normal run checks that:
 

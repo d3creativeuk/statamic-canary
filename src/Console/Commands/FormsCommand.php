@@ -255,7 +255,8 @@ class FormsCommand extends Command
     {
         $notes = array_filter([
             $integration->registered() ? null : 'not registered',
-            $integration->hasApiCheck() ? null : 'no API check',
+            // A package's listener can't be given one, so it isn't something to fix.
+            $integration->hasApiCheck() || $integration->package() ? null : 'no API check',
         ]);
 
         return $notes ? ' ('.implode(', ', $notes).')' : '';
@@ -353,7 +354,7 @@ class FormsCommand extends Command
         match (true) {
             $integration->hasApiCheck() => $this->components->info("{$label} check passed."),
             // The site can't add methods to a package's listener, so there's nothing to point it at.
-            Integration::fromPackage($integration->class) => $this->components->info("{$label} check passed. It comes from a package, so only its registration and fields were checked."),
+            $integration->package() !== null => $this->components->info("{$label} check passed. ".($integration->addon() ? "It's an addon" : 'It comes from a package').', so only its registration and fields were checked.'),
             default => $this->components->warn("{$label} found, but there's no API check. See ".self::INTEGRATION_DOCS),
         };
 

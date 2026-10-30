@@ -15,6 +15,7 @@ use PHPUnit\Framework\Attributes\Test;
 use ReflectionProperty;
 use Statamic\Events\FormSubmitted;
 use Statamic\Events\SubmissionCreated;
+use Statamic\Facades\Addon;
 use Statamic\Facades\Form;
 
 class IntegrationsTest extends TestCase
@@ -238,10 +239,40 @@ class IntegrationsTest extends TestCase
     }
 
     #[Test]
-    public function a_package_listener_isnt_sent_to_the_docs()
+    public function a_package_listener_is_named_after_its_package()
     {
-        // As a path repository installs it: vendor/acme/crm is a symlink, and
-        // Composer maps it as vendor/composer/../acme/crm.
+        $this->makeForm('contact', [self::EMAIL]);
+        $this->withPackageListener(function () {
+            $this->artisan('canary:forms', ['--to' => 'me@example.com'])
+                ->expectsChoice('Which forms should Canary test? 1 form found.', ['contact'], [
+                    'contact', 'contact - notification email, FakeCRM, acme/crm',
+                ])
+                ->expectsConfirmation('Save these as the forms to test next time?', 'no')
+                ->expectsOutputToContain('contact: acme/crm check passed. It comes from a package, so only its registration and fields were checked.')
+                ->doesntExpectOutputToContain('acme/crm found')
+                ->assertSuccessful();
+        });
+    }
+
+    #[Test]
+    public function an_addon_listener_is_named_after_the_addon()
+    {
+        $this->makeForm('contact', [self::EMAIL]);
+        Addon::all()->put('acme/crm', Addon::make('acme/crm')->name('Acme CRM'));
+
+        $this->withPackageListener(function () {
+            $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+                ->expectsOutputToContain("contact: Acme CRM check passed. It's an addon, so only its registration and fields were checked.")
+                ->assertSuccessful();
+        });
+    }
+
+    /**
+     * Installs tests/Fixtures/Packages/acme-crm as a path repository does: vendor/acme/crm
+     * is a symlink, and Composer maps it as vendor/composer/../acme/crm.
+     */
+    private function withPackageListener(callable $test): void
+    {
         $vendor = dirname(__DIR__).'/__fixtures__/tmp/vendor';
         File::ensureDirectoryExists($vendor.'/composer');
         File::ensureDirectoryExists($vendor.'/acme');
@@ -252,13 +283,8 @@ class IntegrationsTest extends TestCase
         $loader->register();
 
         try {
-            $this->makeForm('contact', [self::EMAIL]);
             Event::listen(FormSubmitted::class, 'Acme\Crm\SyncToAcme');
-
-            $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
-                ->expectsOutputToContain('contact: SyncToAcme check passed. It comes from a package, so only its registration and fields were checked.')
-                ->doesntExpectOutputToContain('SyncToAcme found')
-                ->assertSuccessful();
+            $test();
         } finally {
             $loader->unregister();
         }

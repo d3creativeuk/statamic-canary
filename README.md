@@ -326,7 +326,7 @@ Canary controls the recipients it hands to Statamic. Anything that changes recip
 - a custom `send_email_job` in `config/statamic/forms.php` that loads the form again or chooses its own recipients
 - a listener on Laravel's `MessageSending` event, or a mail provider rule, that adds a recipient (such as an automatic BCC) to every email the site sends
 
-On a site you don't know, check for these before running Canary, or run it with `MAIL_MAILER=log` first and read the recipients in the log.
+On a site you don't know, check for these before running Canary. A trial run with `MAIL_MAILER=log` won't find them all: the log leaves out BCC addresses, a mail provider rule never runs, and a form email with its own `mailer` ignores that setting and sends as usual.
 
 ## What Canary doesn't check
 

@@ -8,6 +8,7 @@ use D3Creative\Canary\Forms\TestSubmission;
 use Illuminate\Console\Command;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Mailer;
+use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -65,6 +66,9 @@ class FormsCommand extends Command
     private int $checksPassed = 0;
 
     private int $apiChecks = 0;
+
+    /** Mailers already created this run, by name. */
+    private array $mailers = [];
 
     private array $untested = [];
 
@@ -376,7 +380,7 @@ class FormsCommand extends Command
 
         // So a dry run can't be mistaken for a full pass.
         if ($this->option('dry-run')) {
-            $this->components->warn('Dry run: no emails were sent'.($this->apiChecks ? ', and the API checks only read' : '').". The mailer and queue weren't tested.");
+            $this->components->warn('Dry run: no emails were sent'.($this->apiChecks ? ', and the API checks only read' : '').". Sending and the queue weren't tested.");
 
             return true;
         }
@@ -663,6 +667,10 @@ class FormsCommand extends Command
             ->unique(fn ($email) => json_encode($email))
             ->values();
 
+        if (! $this->checkMailers($form, $swapped)) {
+            return false;
+        }
+
         foreach ($swapped as $email) {
             try {
                 $this->render(new Email($submission, $email, $site));
@@ -713,6 +721,33 @@ class FormsCommand extends Command
 
         $this->components->info($swapped->count()." email(s) for {$form->handle()} {$this->sentVerb()} to {$to}"
             .($mailers->isNotEmpty() ? ', using the form\'s '.$mailers->implode(', ').' mailer' : '').$merged.'.');
+
+        return true;
+    }
+
+    /**
+     * The mailers the emails use can be created, such as one whose transport package
+     * isn't installed. Rendering doesn't use them, and without --now they'd only fail
+     * later in the queue worker. Creating a mailer sends nothing.
+     */
+    private function checkMailers(FormContract $form, Collection $emails): bool
+    {
+        foreach ($emails->map(fn ($email) => $email['mailer'] ?? config('mail.default'))->unique() as $mailer) {
+            if (isset($this->mailers[$mailer])) {
+                continue;
+            }
+
+            try {
+                // A fresh manager, so the site's own mailers, or a test's fake, aren't touched.
+                (new MailManager(app()))->mailer($mailer)->getSymfonyTransport();
+            } catch (Throwable $e) {
+                $this->components->error("{$form->handle()}: the {$mailer} mailer can't be created, so its emails couldn't be sent. {$e->getMessage()}");
+
+                return false;
+            }
+
+            $this->mailers[$mailer] = true;
+        }
 
         return true;
     }

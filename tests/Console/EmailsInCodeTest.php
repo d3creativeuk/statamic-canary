@@ -241,7 +241,7 @@ class EmailsInCodeTest extends TestCase
             ->expectsOutputToContain('Dry run: Canary builds and checks every email, but sends none.')
             ->expectsOutputToContain('2 email(s) for enquiry would go to me@example.com instead of events@outer.test, sales@outer.test, covering 3 that only differ by recipient.')
             ->expectsOutputToContain('Tested 1 form: 2 emails ready to send.')
-            ->expectsOutputToContain("Dry run: no emails were sent. The mailer and queue weren't tested.")
+            ->expectsOutputToContain("Dry run: no emails were sent. Sending and the queue weren't tested.")
             ->doesntExpectOutputToContain('queue:failed')
             ->assertSuccessful();
 

@@ -16,6 +16,9 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 - **`--scan`** lists every form listener, anything that could email someone other than the test
   address (a custom `send_email_job`, a `MessageSending` listener or a global `mail.to`), each
   form's emails and the failed jobs waiting. It tests nothing and always exits 0.
+- **Each email's mailer is created before anything is sent**, so a missing transport package or
+  a mistyped `MAIL_MAILER` fails the run, `--dry-run` included, instead of failing later in the
+  queue worker. Creating a mailer sends nothing.
 - **More of a listener's code is read:** a variable assigned from the handle, `Str::startsWith()`
   and `str_starts_with()` prefixes matched against the site's forms, `match` and `switch` arms,
   and an early `return` that leaves a form out. Every service the code names is found, not just

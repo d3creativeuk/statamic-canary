@@ -80,7 +80,7 @@ class IntegrationsTest extends TestCase
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--dry-run' => true])
             ->expectsOutputToContain('newsletter: FakeCRM check passed.')
-            ->expectsOutputToContain("Dry run: no emails were sent, and the API checks only read. The mailer and queue weren't tested.")
+            ->expectsOutputToContain("Dry run: no emails were sent, and the API checks only read. Sending and the queue weren't tested.")
             ->assertSuccessful();
 
         $this->assertSame(['newsletter'], FakeCrm::$checked);

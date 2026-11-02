@@ -132,6 +132,7 @@ Before anything is sent, Canary checks each email:
 
 - **The template renders.** A missing or broken template fails the form, and none of its emails are sent.
 - **The real recipients are valid.** Canary reads each email's real `to` before replacing it. An empty or invalid address fails, as a missing setting or routing rule would stop the real email too. An address at `example.com`, `example.org` or `example.net`, including Laravel's default `hello@example.com` as the from address, gets a warning, as it usually means a setting fell back to its default.
+- **Its mailer can be created.** Canary creates each email's mailer, or the default one, without sending anything. A mailer whose transport package was removed, or a `MAIL_MAILER` with a typo, fails here instead of later in the queue worker.
 - **Each email is sent once.** Emails that only differ by recipient, such as one per staff routing rule, would all look the same at your test address, so Canary sends one and says how many it covers.
 
 Checkboxes and multi-selects get every option, so routing rules that match on them all fire.
@@ -159,7 +160,7 @@ It only reports, so it always exits 0. On an unfamiliar site, run `--scan`, then
 INFO  1 email(s) for contact would go to you@example.com instead of hello@yoursite.com.
 ```
 
-No email reaches a mailer or the queue, and no listener runs. API checks still run, as a revoked key or deleted list is one of the things worth catching, and they only read. The run ends by saying the mailer and queue weren't tested, so a dry run can't be mistaken for a full pass. It can't be combined with `--now` or `--subscribe`.
+No email reaches a mailer or the queue, and no listener runs. API checks still run, as a revoked key or deleted list is one of the things worth catching, and they only read. The run ends by saying sending and the queue weren't tested, so a dry run can't be mistaken for a full pass. It can't be combined with `--now` or `--subscribe`.
 
 Use it for a first run on a site you don't know, before anything is sent.
 

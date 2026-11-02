@@ -4,6 +4,7 @@ namespace D3Creative\Canary\Tests\Console;
 
 use D3Creative\Canary\Console\Commands\FormsCommand;
 use D3Creative\Canary\Tests\TestCase;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
@@ -291,6 +292,34 @@ class FormsCommandTest extends TestCase
             ->expectsOutputToContain('Emails send with the postmark-live mailer (postmark).')
             ->doesntExpectOutputToContain('never delivered')
             ->assertSuccessful();
+    }
+
+    #[Test]
+    public function a_mailer_that_cant_be_created_fails_before_anything_is_sent()
+    {
+        // Postmark's transport package isn't installed in the tests, as on a site that dropped it.
+        config(['mail.mailers.postmark' => ['transport' => 'postmark']]);
+        $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'mailer' => 'postmark']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com', '--dry-run' => true])
+            ->expectsOutputToContain("contact: the postmark mailer can't be created, so its emails couldn't be sent.")
+            ->assertFailed();
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->assertFailed();
+
+        Mail::assertNothingSent();
+    }
+
+    #[Test]
+    public function an_email_without_a_mailer_checks_the_default_one()
+    {
+        config(['mail.default' => 'typo']);
+        $this->makeForm('contact', [Arr::except(self::CLIENT_EMAIL, 'mailer')]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("contact: the typo mailer can't be created")
+            ->assertFailed();
     }
 
     #[Test]

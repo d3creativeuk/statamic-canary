@@ -28,7 +28,50 @@ class ListenerSourceTest extends TestCase
                 ['alerts', 'drip'],
             ],
             'no handle' => ['$event->submission->save();', []],
+            'variable' => ["\$handle = \$event->submission->form()->handle();\nif (\$handle === 'contact') {}", ['contact']],
+            'variable on the right' => ["\$form = \$event->submission->form()->handle();\nif ('quote' == \$form) {}", ['quote']],
+            'variable in_array' => ["\$handle = \$event->submission->form()->handle();\nif (in_array(\$handle, ['contact', 'quote'])) {}", ['contact', 'quote']],
+            'match arms' => [
+                "return match (\$event->submission->form()->handle()) {\n'contact', 'quote' => 'sales',\n'careers' => 'hr',\ndefault => null,\n};",
+                ['contact', 'quote', 'careers'],
+            ],
+            'switch cases' => [
+                "\$handle = \$event->submission->form()->handle();\nswitch (\$handle) {\ncase 'contact':\ncase 'quote':\n\$this->sales();\nbreak;\n}",
+                ['contact', 'quote'],
+            ],
+            'early return after ===' => [
+                "\$handle = \$event->submission->form()->handle();\nif (\$handle === 'old_contact') { return; }\nif (in_array(\$handle, ['old_contact', 'contact'])) {}",
+                ['contact'],
+            ],
+            'early return after !== still handles it' => ["if (\$event->submission->form()->handle() !== 'acorn') { return; }", ['acorn']],
         ];
+    }
+
+    #[Test]
+    public function it_matches_handle_prefixes_against_the_sites_forms()
+    {
+        $this->makeForm('b2b_contact');
+        $this->makeForm('b2b_download');
+        $this->makeForm('contact');
+
+        $this->assertSame(['b2b_contact', 'b2b_download'], array_keys($this->source("\$handle = \$event->submission->form()->handle();\nif (Str::startsWith(\$handle, 'b2b_')) {}")->forms()));
+        $this->assertSame(['b2b_contact', 'b2b_download'], array_keys($this->source("if (str_starts_with(\$event->submission->form()->handle(), 'b2b_')) {}")->forms()));
+    }
+
+    #[Test]
+    public function it_says_when_an_else_branch_may_reach_other_forms()
+    {
+        $this->assertTrue($this->source("if (\$event->submission->form()->handle() === 'contact') { \$a(); } else { \$b(); }")->mayHandleOthers());
+        $this->assertTrue($this->source("return match (\$event->submission->form()->handle()) { 'contact' => 1, default => 2 };")->mayHandleOthers());
+        $this->assertFalse($this->source("if (\$event->submission->form()->handle() === 'contact') { \$a(); }")->mayHandleOthers());
+        $this->assertFalse($this->source('if ($x) { $a(); } else { $b(); }')->mayHandleOthers());
+    }
+
+    #[Test]
+    public function it_finds_every_service_the_code_names()
+    {
+        $this->assertSame(['Mailchimp', 'Zoho'], $this->source('AddToMailchimpAudience::dispatch($s); CreateZohoLead::dispatch($s);')->services());
+        $this->assertSame([], $this->source('$event->submission->save();')->services());
     }
 
     #[Test]

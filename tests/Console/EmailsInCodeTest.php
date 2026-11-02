@@ -5,6 +5,7 @@ namespace D3Creative\Canary\Tests\Console;
 use D3Creative\Canary\Tests\Fixtures\App\Listeners\PlainListener;
 use D3Creative\Canary\Tests\Fixtures\BuildsQuoteEmails;
 use D3Creative\Canary\Tests\Fixtures\HandleFormSubmissions;
+use D3Creative\Canary\Tests\Fixtures\SplitsB2bForms;
 use D3Creative\Canary\Tests\Fixtures\ValidateRecaptcha;
 use D3Creative\Canary\Tests\TestCase;
 use Illuminate\Support\Facades\Event;
@@ -197,6 +198,24 @@ class EmailsInCodeTest extends TestCase
             ])
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->expectsOutputToContain("contact: nothing in the form's settings, ".PlainListener::class.' may handle it.')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function a_form_an_else_branch_may_reach_isnt_reported_as_empty()
+    {
+        Event::forget(SubmissionCreated::class);
+        Event::listen(SubmissionCreated::class, SplitsB2bForms::class);
+        $this->makeForm('b2b_contact');
+        $this->makeForm('widget');
+
+        $this->artisan('canary:forms', ['--to' => 'me@example.com'])
+            ->expectsChoice('Which forms should Canary test? 2 forms found.', ['b2b_contact'], [
+                'b2b_contact', 'widget',
+                'b2b_contact - SplitsB2bForms (no API check)',
+                "widget - nothing in the form's settings, ".SplitsB2bForms::class.' may handle it',
+            ])
+            ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->assertSuccessful();
     }
 

@@ -6,11 +6,14 @@ use D3Creative\Canary\Forms\Integration;
 use D3Creative\Canary\Forms\ReadOnlyRequests;
 use D3Creative\Canary\Forms\TestSubmission;
 use Illuminate\Console\Command;
+use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Mailer;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use ReflectionFunction;
 use RuntimeException;
 use Statamic\Console\RunsInPlease;
 use Statamic\Contracts\Addons\Settings;
@@ -20,6 +23,7 @@ use Statamic\Facades\Form;
 use Statamic\Facades\Site;
 use Statamic\Fields\Field;
 use Statamic\Forms\Email;
+use Statamic\Forms\SendEmail;
 use Statamic\Forms\SendEmails;
 use Statamic\Sites\Site as SiteObject;
 use Throwable;
@@ -38,6 +42,7 @@ class FormsCommand extends Command
                             {--pick : Choose forms from the list, even if some are configured or saved}
                             {--now : Send the emails straight away instead of through the queue, so mailer errors fail the run}
                             {--dry-run : Build and check every email and run the API checks, but send nothing}
+                            {--scan : List everything that can act on a form submission, without testing anything}
                             {--subscribe : Also add the test address through each integration, then delete it}';
 
     private const DOCS = 'https://github.com/d3creativeuk/statamic-canary';
@@ -65,6 +70,10 @@ class FormsCommand extends Command
 
     public function handle(): int
     {
+        if ($this->option('scan')) {
+            return $this->scan();
+        }
+
         $to = $this->option('to') ?: config('canary.to');
 
         if (! $to) {
@@ -112,6 +121,169 @@ class FormsCommand extends Command
         }
 
         return $this->summarise() && ! $failed ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * A first look at a site: what listens for form submissions, what could email
+     * someone other than the test address, and each form's emails. It builds, sends
+     * and calls nothing, and never fails the run.
+     */
+    private function scan(): int
+    {
+        $this->components->info('Scanning what can act on a form submission. No email is built or sent, and no listener or API check runs.');
+
+        $this->scanListeners();
+        $this->scanRecipients();
+        $this->scanForms();
+        $this->scanQueue();
+
+        return self::SUCCESS;
+    }
+
+    private function scanListeners(): void
+    {
+        $this->heading('Form listeners');
+
+        $listeners = Integration::listeners();
+
+        foreach ($listeners as $integration) {
+            $source = $integration->source();
+            $forms = $integration->knownFormHandles();
+
+            $this->components->twoColumnDetail(
+                "<fg=bright-white>{$integration->class}</>",
+                $integration->registered() ? class_basename($integration->event) : '<fg=red>not registered</>',
+            );
+
+            $details = array_filter([
+                'Forms' => match (true) {
+                    $source->isValidator() => 'none, it rejects submissions rather than sending them',
+                    ! $forms => '<fg=yellow>can\'t tell</>',
+                    default => implode(', ', $forms).($integration->mayHandleOthers() ? ', <fg=yellow>and maybe others</>' : ''),
+                },
+                'Services' => implode(', ', $source->services()),
+                'Emails' => match (true) {
+                    $integration->buildsEmails() => 'built in code, with canaryEmails()',
+                    $integration->buildsHiddenEmails() => '<fg=yellow>built in code, which Canary can\'t see without canaryEmails()</>',
+                    default => null,
+                },
+                'Canary methods' => implode(', ', $integration->methods()) ?: 'none',
+                'From' => ($package = $integration->package()) ? ($integration->addon() ?? $package) : null,
+            ]);
+
+            foreach ($details as $label => $value) {
+                $this->components->twoColumnDetail("<fg=gray>{$label}</>", $value);
+            }
+
+            $this->newLine();
+        }
+
+        if ($closures = Integration::closures()) {
+            $this->components->twoColumnDetail('<fg=yellow>'.$closures.' '.Str::plural('closure', $closures).'</>', "Canary can't read what a closure does");
+        }
+
+        if ($listeners->isEmpty() && ! $closures) {
+            $this->components->twoColumnDetail('None', 'Only the form\'s own email settings act on a submission');
+        }
+    }
+
+    /**
+     * The README's "What could still email someone else": things that change the
+     * recipients after Canary has set them.
+     */
+    private function scanRecipients(): void
+    {
+        $this->heading('Could email someone else');
+
+        $found = array_filter([
+            config('statamic.forms.send_email_job', SendEmail::class) !== SendEmail::class
+                ? 'A custom send_email_job, '.config('statamic.forms.send_email_job').', which may choose its own recipients' : null,
+            ($address = config('mail.to.address')) ? "mail.to sends every email the site sends to {$address}" : null,
+            ...collect(Event::getRawListeners()[MessageSending::class] ?? [])
+                ->map(fn ($listener) => 'A MessageSending listener, '.$this->describeListener($listener).', which can add a recipient such as a BCC')
+                ->all(),
+        ]);
+
+        foreach ($found as $finding) {
+            $this->components->warn($finding);
+        }
+
+        if (! $found) {
+            $this->components->twoColumnDetail('Nothing found', 'A mail provider rule could still add a recipient. Canary can\'t see those');
+        }
+    }
+
+    /**
+     * A listener's class, or for a closure where it's defined, so a package's
+     * hook (such as Laravel Nightwatch's) can be told apart from the site's own.
+     */
+    private function describeListener(mixed $listener): string
+    {
+        if (is_string($listener)) {
+            return Str::before($listener, '@');
+        }
+
+        if (is_array($listener)) {
+            return is_string($listener[0]) ? $listener[0] : $listener[0]::class;
+        }
+
+        $function = new ReflectionFunction($listener);
+        $file = Str::after($function->getFileName(), base_path().DIRECTORY_SEPARATOR);
+        $package = preg_match('#^vendor/([^/]+/[^/]+)/#', $file, $match) ? " from {$match[1]}" : '';
+
+        return "a closure{$package} ({$file}:{$function->getStartLine()})";
+    }
+
+    private function scanForms(): void
+    {
+        $this->heading('Forms');
+
+        foreach (Form::all() as $form) {
+            $emails = $this->emailConfigs($form);
+
+            $notes = collect($emails)
+                ->flatMap(fn ($email) => array_filter([
+                    isset($email['cc']) ? "cc {$email['cc']}" : null,
+                    isset($email['bcc']) ? "bcc {$email['bcc']}" : null,
+                    isset($email['mailer']) ? "{$email['mailer']} mailer" : null,
+                ]))
+                ->unique();
+
+            $listeners = $this->integrations($form->handle())->map(fn (Integration $integration) => class_basename($integration->class));
+
+            $this->components->twoColumnDetail(
+                $form->handle(),
+                ($emails ? $this->emailKinds($emails, '') : 'no emails in its settings')
+                    .($notes->isNotEmpty() ? ', '.$notes->implode(', ') : '')
+                    .($listeners->isNotEmpty() ? ', handled by '.$listeners->implode(', ') : ''),
+            );
+        }
+    }
+
+    private function scanQueue(): void
+    {
+        $this->heading('Queue');
+
+        try {
+            $failed = app('queue.failer');
+            $count = method_exists($failed, 'count') ? $failed->count() : count($failed->all());
+        } catch (Throwable $e) {
+            // Database errors include the connection details and the query, which only add noise here.
+            $this->components->twoColumnDetail('Failed jobs', "<fg=yellow>couldn't be read</>: ".Str::before($e->getMessage(), ' (Connection:'));
+
+            return;
+        }
+
+        $count
+            ? $this->components->warn("{$count} failed ".Str::plural('job', $count).'. Run php artisan queue:failed to see whether any are form emails.')
+            : $this->components->twoColumnDetail('Failed jobs', 'none');
+    }
+
+    private function heading(string $text): void
+    {
+        $this->newLine();
+        $this->line("  <fg=bright-white;options=bold>{$text}</>");
+        $this->newLine();
     }
 
     /**
@@ -324,8 +496,24 @@ class FormsCommand extends Command
             ->filter()
             ->merge($this->integrations($form->handle())
                 ->reject(fn (Integration $integration) => $integration->onlyBuildsEmails())
-                ->map(fn (Integration $integration) => $integration->name().$this->notes($integration)))
+                ->flatMap(fn (Integration $integration) => $this->services($form, $integration)))
             ->all();
+    }
+
+    /**
+     * Each service a listener checks gets its own entry, e.g. ['Mailchimp', 'Zoho'].
+     */
+    private function services(FormContract $form, Integration $integration): array
+    {
+        if (! $integration->hasChecks()) {
+            return [$integration->name().$this->notes($integration)];
+        }
+
+        try {
+            return array_map(fn ($name) => $name.$this->notes($integration), array_keys($integration->checks($form->handle())));
+        } catch (Throwable $e) {
+            return ["canaryChecks() in {$integration->class} failed: {$e->getMessage()}"];
+        }
     }
 
     /**
@@ -342,8 +530,14 @@ class FormsCommand extends Command
             return $hidden->all();
         }
 
+        // Listeners whose forms are unknown, and ones with an else branch that may reach this form.
         return Integration::unknown()
+            ->merge(($this->integrations ??= Integration::all())
+                ->filter(fn (Integration $integration) => $integration->mayHandleOthers())
+                ->map(fn (Integration $integration) => $integration->class))
+            ->unique()
             ->map(fn (?string $class) => 'nothing in the form\'s settings, '.($class ?? 'a closure listener').' may handle it')
+            ->values()
             ->all();
     }
 
@@ -630,6 +824,12 @@ class FormsCommand extends Command
             return true;
         }
 
+        if ($integration->hasChecks()) {
+            $passed = $this->runChecks($form, $integration);
+
+            return $passed && $this->option('subscribe') ? $this->subscribe($form, $integration, $to, $label) : $passed;
+        }
+
         if ($integration->hasApiCheck()) {
             $this->apiChecks++;
 
@@ -665,10 +865,62 @@ class FormsCommand extends Command
         return true;
     }
 
+    /**
+     * Each service in canaryChecks() passes or fails on its own. A check that returns a
+     * string passes with that as a warning, such as "disabled in Globals".
+     */
+    private function runChecks(FormContract $form, Integration $integration): bool
+    {
+        try {
+            $checks = $integration->checks($form->handle());
+        } catch (Throwable $e) {
+            $this->components->error("{$form->handle()}: canaryChecks() in {$integration->class} failed: {$e->getMessage()}");
+
+            return false;
+        }
+
+        $passed = true;
+
+        foreach ($checks as $name => $check) {
+            $label = "{$form->handle()}: {$name}";
+            $this->apiChecks++;
+
+            try {
+                $result = ReadOnlyRequests::run($check, $blocked);
+            } catch (Throwable $e) {
+                $this->components->error("{$label} check failed: {$e->getMessage()}");
+                $passed = false;
+
+                continue;
+            }
+
+            if ($blocked) {
+                $this->components->error("{$label} check failed: it made a ".implode(', ', $blocked).' request, which Canary blocked. A check must only read.');
+                $passed = false;
+
+                continue;
+            }
+
+            $this->checksPassed++;
+
+            is_string($result) && $result !== ''
+                ? $this->components->warn("{$label} check passed, with a warning: {$result}")
+                : $this->components->info("{$label} check passed.");
+        }
+
+        return $passed;
+    }
+
     private function subscribe(FormContract $form, Integration $integration, string $to, string $label): bool
     {
         if (! $integration->canSubscribe()) {
             $this->components->warn("{$label}: --subscribe skipped, as it has no canaryContact and canaryDelete methods.");
+
+            return true;
+        }
+
+        if ($reason = $integration->subscribeRefusal($form->handle())) {
+            $this->components->warn("{$label}: --subscribe refused, as {$reason}. It runs the whole listener, so the test contact would reach each of them, and Canary can only delete it from one.");
 
             return true;
         }

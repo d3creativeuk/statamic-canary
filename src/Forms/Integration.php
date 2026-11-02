@@ -2,6 +2,7 @@
 
 namespace D3Creative\Canary\Forms;
 
+use Closure;
 use Composer\Autoload\ClassLoader;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Arr;
@@ -22,6 +23,7 @@ use Throwable;
  *   canaryForms(): array                                 form handle => fields it reads (required)
  *   canaryName(): string                                 e.g. 'MailerLite'
  *   canaryCheck(string $form): void                      a read-only API call that throws on failure
+ *   canaryChecks(string $form): array                    name => callable, for a listener with several services
  *   canaryEmails(string $form, Submission $s): array     the emails it builds, as $form->email() returns them
  *   canaryContact(string $form, string $email): ?string  the contact's ID in the account, or null
  *   canaryDelete(string $form, string $id): void         deletes that contact
@@ -51,20 +53,60 @@ class Integration
      */
     public static function all(): Collection
     {
+        return self::listeners()
+            ->filter(fn (self $integration) => $integration->knownForms())
+            ->values();
+    }
+
+    /**
+     * Every class listening for a form event, and every one in app/Listeners,
+     * whether or not Canary can tell which forms it handles. Closures are left out.
+     */
+    public static function listeners(): Collection
+    {
         $registered = collect(self::EVENTS)
             ->flatMap(fn ($event) => collect(Event::getRawListeners()[$event] ?? [])
                 ->map(fn ($listener) => self::parse($listener, $event))
                 ->filter())
             ->keyBy('class');
 
+        // Only ones that mention a form event: app/Listeners also holds listeners for entries and the like.
         $unregistered = collect(self::appListeners())
             ->reject(fn ($class) => $registered->has($class))
-            ->map(fn ($class) => new self($class));
+            ->map(fn ($class) => new self($class))
+            ->filter(fn (self $integration) => $integration->configured() || $integration->source()->listensForForms());
 
-        return $registered->values()
-            ->merge($unregistered)
-            ->filter(fn (self $integration) => $integration->knownForms())
-            ->values();
+        return $registered->values()->merge($unregistered)->values();
+    }
+
+    /**
+     * How many closures listen for a form event. Canary can't read them.
+     */
+    public static function closures(): int
+    {
+        return collect(self::EVENTS)
+            ->flatMap(fn ($event) => Event::getRawListeners()[$event] ?? [])
+            ->filter(fn ($listener) => $listener instanceof Closure)
+            ->count();
+    }
+
+    /**
+     * The Canary methods the listener has, such as ['canaryForms', 'canaryCheck'].
+     */
+    public function methods(): array
+    {
+        return array_values(array_filter(
+            ['canaryForms', 'canaryName', 'canaryCheck', 'canaryChecks', 'canaryEmails', 'canaryContact', 'canaryDelete'],
+            fn ($method) => method_exists($this->class, $method),
+        ));
+    }
+
+    /**
+     * The forms it handles, or [] when Canary can't tell or the listener can't be read.
+     */
+    public function knownFormHandles(): array
+    {
+        return array_keys($this->knownForms());
     }
 
     /**
@@ -221,7 +263,50 @@ class Integration
 
     public function hasApiCheck(): bool
     {
-        return method_exists($this->class, 'canaryCheck');
+        return method_exists($this->class, 'canaryCheck') || $this->hasChecks();
+    }
+
+    /**
+     * Whether it checks several services itself, which takes precedence over canaryCheck().
+     */
+    public function hasChecks(): bool
+    {
+        return method_exists($this->class, 'canaryChecks');
+    }
+
+    /**
+     * Service name => a read-only check that throws on failure, or returns a warning.
+     */
+    public function checks(string $form): array
+    {
+        return array_filter($this->listener()->canaryChecks($form) ?? [], 'is_callable');
+    }
+
+    /**
+     * Why --subscribe would be unsafe. It runs the whole listener, so a listener
+     * that sends to several services would add the test contact to each, and
+     * canaryDelete() only removes it from one.
+     */
+    public function subscribeRefusal(string $form): ?string
+    {
+        if ($this->hasChecks() && count($names = array_keys($this->checks($form))) > 1) {
+            return 'it has checks for '.Arr::join($names, ', ', ' and ');
+        }
+
+        if (count($services = $this->source()->services()) > 1) {
+            return 'its code names '.Arr::join($services, ', ', ' and ');
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether forms it isn't known to handle may still reach it, through an else
+     * branch or a default arm. Only for listeners Canary reads the code of.
+     */
+    public function mayHandleOthers(): bool
+    {
+        return ! $this->configured() && $this->source()->mayHandleOthers();
     }
 
     public function registered(): bool

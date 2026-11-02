@@ -39,6 +39,9 @@ php artisan canary:forms --pick
 # Send as the French site on a multisite
 php artisan canary:forms contact --site=fr
 
+# List everything that can act on a form submission, without testing anything
+php artisan canary:forms --scan
+
 # Check everything and run the API checks, but send nothing
 php artisan canary:forms contact --dry-run
 
@@ -60,6 +63,7 @@ The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#s
 | `--to` | The address that receives every test email. |
 | `--site` | Handle of the site to send as, on a multisite. Defaults to the default site. |
 | `--pick` | Choose forms from the list, even if some are saved or configured. |
+| `--scan` | List the site's form listeners, anything that could email someone else, each form's emails and failed jobs, without testing anything. See [Scanning a site](#scanning-a-site). |
 | `--dry-run` | Build and check every email and run the API checks, but send nothing. See [Dry run](#dry-run). |
 | `--now` | Send the emails straight away instead of through the queue, so a mailer or sender error fails the run. This doesn't test a queue worker. |
 | `-v` | List the real recipients of each email, which Canary checks but never emails. |
@@ -135,6 +139,17 @@ Checkboxes and multi-selects get every option, so routing rules that match on th
 A run starts by naming the queue connection and mailer, then reports each form's emails and integration checks:
 
 ![A Canary run naming the queue and mailer, then reporting each form's emails and integration checks](art/canary-run.png)
+
+### Scanning a site
+
+`--scan` is for a first look at a site you don't know. It tests nothing: no email is built or sent, and no listener or API check runs. It doesn't need `--to`. It lists:
+
+- **Every form listener**, registered or not: the forms it handles, the services its code names, whether it builds emails in code, and which Canary methods it has. Validators, package listeners and closures are labelled.
+- **Anything that could email someone else**, from [What could still email someone else](#what-could-still-email-someone-else): a custom `send_email_job`, a listener on Laravel's `MessageSending` event, or a global `mail.to` address. A closure is named by the file it's in, so a package's hook, such as Laravel Nightwatch's, can be told apart from the site's own.
+- **Each form's emails**, with any `cc`, `bcc` or mailer of their own, and the listeners that handle the form.
+- **Failed jobs** waiting in the queue, which are often the first sign a form has stopped sending.
+
+It only reports, so it always exits 0. On an unfamiliar site, run `--scan`, then `--dry-run`, then a real run.
 
 ### Dry run
 
@@ -232,6 +247,7 @@ For the full check, a listener tells Canary about itself through a few plain met
 | `canaryForms(): array` | Each form the listener handles, and the fields it reads: `['contact' => ['email']]`. |
 | `canaryName(): string` | The name shown in the list and the output, such as `MailerLite`. Defaults to the class name. |
 | `canaryCheck(string $form): void` | A read-only API call that throws if something's wrong, such as a bad API key or a deleted list. |
+| `canaryChecks(string $form): array` | For a listener that sends to several services: a read-only check for each, by name. Takes the place of `canaryName()` and `canaryCheck()`. See [Several services in one listener](#several-services-in-one-listener). |
 | `canaryEmails(string $form, Submission $submission): array` | The emails the listener builds for the form. See [Emails built in code](#emails-built-in-code). |
 | `canaryContact(string $form, string $email): ?string` | The ID of the contact with this email address, or `null`. Only needed for `--subscribe`. |
 | `canaryDelete(string $form, string $id): void` | Deletes that contact. Only needed for `--subscribe`. |
@@ -360,6 +376,29 @@ ActiveCampaign automations often notify the client's staff, for example by email
 
 One listener can handle many forms, and one form can have several listeners. Canary checks each listener for each form.
 
+### Several services in one listener
+
+A listener that sends each submission to more than one service, such as Mailchimp for every form and a CRM for one, returns a check for each from `canaryChecks()`:
+
+```php
+public function canaryChecks(string $form): array
+{
+    return array_filter([
+        'Mailchimp' => fn () => $this->mailchimp->audience(config('services.mailchimp.audience')),
+        'Zoho' => $form === 'b2b_contact' ? fn () => $this->zoho->getCRMModuleID('Leads') : null,
+    ]);
+}
+```
+
+Each service is listed by name in the picker and checked on its own, so one failing doesn't hide the other. A check that throws fails. One that returns a string passes with that as a warning, which suits a service that's been switched off on purpose:
+
+```
+INFO  contact: Mailchimp check passed.
+WARN  contact: Zoho check passed, with a warning: disabled in Globals
+```
+
+The same read-only rule applies: a check must never refresh a stored token. Use the token as it is, so an expired one fails the check instead of being replaced.
+
 ### Without the methods
 
 Canary never adds these methods for you: it doesn't change your code. Without them, Canary reads the listener's code to find the forms it handles, so a site works out of the box. It recognises the usual ways a listener picks its forms:
@@ -369,9 +408,18 @@ if ($event->submission->form()->handle() == 'contact')
 if (in_array($event->submission->form()->handle(), ['contact', 'quote']))
 if ($submission->form()->handle() !== config('acorn.form'))
 $groupId = $this->groups[$event->submission->form()->handle()] ?? null;
+
+$handle = $event->submission->form()->handle();
+if ($handle === 'contact')
+if (Str::startsWith($handle, 'b2b_'))      // matched against the site's forms
+match ($handle) { 'contact', 'quote' => ... }
+switch ($handle) { case 'contact': ... }
+if ($handle === 'old_contact') { return; } // leaves old_contact out
 ```
 
-It also finds the fields a listener reads (`$submission->email` or `$submission->get('email')`) when it handles a single form, and the service's name when the code mentions one, such as ActiveCampaign or MailerLite. The list then shows:
+Forms that reach the listener through an `else` branch or a `default` arm can't be read reliably, so Canary doesn't guess. A form with nothing else to test shows `nothing in the form's settings, App\Listeners\X may handle it` instead of reporting nothing to test.
+
+It also finds the fields a listener reads (`$submission->email` or `$submission->get('email')`) when it handles a single form, and every service the code names, such as ActiveCampaign or MailerLite. The list then shows:
 
 ```
 contact - notification email, ActiveCampaign (no API check)
@@ -408,6 +456,8 @@ ERROR  newsletter: MailerLite check failed: [url] /api/groups/1234567890 [http m
 3. Checks the contact arrived, then deletes it.
 
 If the delete fails, Canary prints the contact's ID so you can delete it by hand.
+
+Canary refuses `--subscribe` for a listener that sends to more than one service, because it runs the whole listener: the test contact would reach every service, and `canaryDelete()` can only remove it from one. It refuses when the listener has more than one check in `canaryChecks()`, and when its code names more than one service, even if only one is declared.
 
 Deleting the contact doesn't undo what happened when it was added. If the list or group starts an automation, it may already have sent its first email to your test address, notified someone, or called a webhook. Check a site's automations before the first `--subscribe` run. A listener with its own rate limit may also ignore a second run within a short time; Canary reports that the contact never arrived.
 

@@ -6,6 +6,29 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Added
+
+- **`canaryChecks()`** for a listener that sends to several services. Each service gets its own
+  read-only check, is listed by name and passes or fails on its own. A check that returns a
+  string passes with it as a warning, such as "disabled in Globals".
+- **`--scan`** lists every form listener, anything that could email someone other than the test
+  address (a custom `send_email_job`, a `MessageSending` listener or a global `mail.to`), each
+  form's emails and the failed jobs waiting. It tests nothing and always exits 0.
+- **More of a listener's code is read:** a variable assigned from the handle, `Str::startsWith()`
+  and `str_starts_with()` prefixes matched against the site's forms, `match` and `switch` arms,
+  and an early `return` that leaves a form out. Every service the code names is found, not just
+  the first.
+
+### Changed
+
+- **`--subscribe` is refused for a listener that sends to more than one service**, by its checks
+  or its code. It runs the whole listener, so the test contact would reach every service and
+  could only be deleted from one.
+- **A form an `else` branch or `default` arm may reach** isn't reported as having nothing to test.
+- **Unregistered listeners in `app/Listeners` are only listed if they're for forms.**
+
 ## [1.2.0] - 2026-11-02
 
 ### Added

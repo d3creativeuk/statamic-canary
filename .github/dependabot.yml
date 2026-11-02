@@ -1,0 +1,11 @@
+# Keeps the SHA-pinned actions in the workflows up to date. composer.lock isn't
+# committed, so Composer dependencies need no updates here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # Matches the Composer cooldown: wait a week before taking a new release.
+    cooldown:
+      default-days: 7

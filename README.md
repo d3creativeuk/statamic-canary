@@ -339,7 +339,7 @@ A scheduled mode that alerts you when a form stops sending, and a Control Panel 
 
 ## Support
 
-Canary is maintained by [D3 Creative](https://d3creative.uk). Report bugs or ask questions in [GitHub issues](https://github.com/d3creativeuk/statamic-canary/issues). For enquiries about managed Statamic maintenance, visit [d3creative.uk/services/statamic-maintenance](https://d3creative.uk/services/statamic-maintenance).
+Canary is maintained by [D3 Creative](https://d3creative.uk). Report bugs or ask questions in [GitHub issues](https://github.com/d3creativeuk/statamic-canary/issues). Report security problems privately instead. See the [security policy](https://github.com/d3creativeuk/statamic-canary/security/policy). For enquiries about managed Statamic maintenance, visit [d3creative.uk/services/statamic-maintenance](https://d3creative.uk/services/statamic-maintenance).
 
 ## License
 

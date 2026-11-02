@@ -17,6 +17,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 - **Each email is checked before it's sent.** Its template must render, and its real recipients,
   read before the test address replaces them, must be valid email addresses. A placeholder
   address such as `hello@example.com` gets a warning. `-v` lists the real recipients.
+- **`--dry-run`** builds and checks every email and runs the API checks, but sends nothing. It
+  reports where each email would have gone instead, and says the mailer and queue weren't tested.
 - **`--now`** sends the emails during the run instead of through the queue, so a mailer error
   fails it.
 - **A summary at the end of every run**, and a reminder to check `queue:failed` when the emails

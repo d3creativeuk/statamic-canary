@@ -74,6 +74,20 @@ class IntegrationsTest extends TestCase
     }
 
     #[Test]
+    public function a_dry_run_still_runs_the_api_checks()
+    {
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--dry-run' => true])
+            ->expectsOutputToContain('newsletter: FakeCRM check passed.')
+            ->expectsOutputToContain("Dry run: no emails were sent, and the API checks only read. The mailer and queue weren't tested.")
+            ->assertSuccessful();
+
+        $this->assertSame(['newsletter'], FakeCrm::$checked);
+        $this->assertSame([], FakeCrm::$received);
+    }
+
+    #[Test]
     public function a_form_with_only_an_integration_is_still_tested()
     {
         $this->makeForm('newsletter');

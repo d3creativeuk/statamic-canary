@@ -212,6 +212,53 @@ class EmailsInCodeTest extends TestCase
     }
 
     #[Test]
+    public function a_dry_run_checks_everything_but_sends_nothing()
+    {
+        config(['queue.default' => 'redis']);
+        Queue::fake();
+        $this->makeForm('enquiry', fields: self::ENQUIRY_FIELDS);
+
+        $this->artisan('canary:forms', ['forms' => ['enquiry'], '--to' => 'me@example.com', '--dry-run' => true])
+            ->expectsOutputToContain('Dry run: Canary builds and checks every email, but sends none.')
+            ->expectsOutputToContain('2 email(s) for enquiry would go to me@example.com instead of events@outer.test, sales@outer.test, covering 3 that only differ by recipient.')
+            ->expectsOutputToContain('Tested 1 form: 2 emails ready to send.')
+            ->expectsOutputToContain("Dry run: no emails were sent. The mailer and queue weren't tested.")
+            ->doesntExpectOutputToContain('queue:failed')
+            ->assertSuccessful();
+
+        Mail::assertNothingSent();
+        Queue::assertNothingPushed();
+        $this->assertFalse(HandleFormSubmissions::$handled);
+        // The swap is only made when sending, so the in-memory form keeps its own settings.
+        $this->assertEmpty(Form::find('enquiry')->email());
+    }
+
+    #[Test]
+    public function a_dry_run_still_fails_on_a_broken_email()
+    {
+        HandleFormSubmissions::$downloadTo = '';
+        $this->makeForm('download', fields: self::ENQUIRY_FIELDS);
+
+        $this->artisan('canary:forms', ['forms' => ['download'], '--to' => 'me@example.com', '--dry-run' => true])
+            ->expectsOutputToContain('has no recipient')
+            ->assertFailed();
+    }
+
+    #[Test]
+    public function a_dry_run_cant_subscribe_or_send_now()
+    {
+        $this->makeForm('download', fields: self::ENQUIRY_FIELDS);
+
+        $this->artisan('canary:forms', ['forms' => ['download'], '--to' => 'me@example.com', '--dry-run' => true, '--subscribe' => true])
+            ->expectsOutputToContain("--dry-run sends nothing, so it can't be used with --subscribe.")
+            ->assertFailed();
+
+        $this->artisan('canary:forms', ['forms' => ['download'], '--to' => 'me@example.com', '--dry-run' => true, '--now' => true])
+            ->expectsOutputToContain("--dry-run sends nothing, so it can't be used with --now.")
+            ->assertFailed();
+    }
+
+    #[Test]
     public function now_sends_the_emails_without_the_queue()
     {
         config(['queue.default' => 'redis']);

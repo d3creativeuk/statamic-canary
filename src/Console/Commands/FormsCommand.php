@@ -37,6 +37,7 @@ class FormsCommand extends Command
                             {--site= : Handle of the site to send as. Defaults to the default site}
                             {--pick : Choose forms from the list, even if some are configured or saved}
                             {--now : Send the emails straight away instead of through the queue, so mailer errors fail the run}
+                            {--dry-run : Build and check every email and run the API checks, but send nothing}
                             {--subscribe : Also add the test address through each integration, then delete it}';
 
     private const DOCS = 'https://github.com/d3creativeuk/statamic-canary';
@@ -57,6 +58,8 @@ class FormsCommand extends Command
     private int $dispatched = 0;
 
     private int $checksPassed = 0;
+
+    private int $apiChecks = 0;
 
     private array $untested = [];
 
@@ -84,6 +87,15 @@ class FormsCommand extends Command
             return self::FAILURE;
         }
 
+        // A dry run sends nothing, and both of these would.
+        foreach (['subscribe', 'now'] as $option) {
+            if ($this->option('dry-run') && $this->option($option)) {
+                $this->components->error("--dry-run sends nothing, so it can't be used with --{$option}.");
+
+                return self::FAILURE;
+            }
+        }
+
         $this->warnAboutUnknownListeners();
 
         if (! $handles = $this->handles($to)) {
@@ -108,6 +120,12 @@ class FormsCommand extends Command
      */
     private function reportQueue(): void
     {
+        if ($this->option('dry-run')) {
+            $this->components->warn('Dry run: Canary builds and checks every email, but sends none.');
+
+            return;
+        }
+
         if ($this->option('now')) {
             $this->components->warn('With --now, emails send straight away instead of through the queue, so this tests the mailer but not a queue worker.');
 
@@ -178,11 +196,18 @@ class FormsCommand extends Command
         }
 
         $results = array_filter([
-            $this->dispatched ? $this->dispatched.' '.Str::plural('email', $this->dispatched).($this->option('now') ? ' sent' : ' dispatched') : null,
+            $this->dispatched ? $this->dispatched.' '.Str::plural('email', $this->dispatched).' '.$this->sentVerb() : null,
             $this->checksPassed ? $this->checksPassed.' integration '.Str::plural('check', $this->checksPassed).' passed' : null,
         ]);
 
         $this->components->info("Tested {$this->tested} ".Str::plural('form', $this->tested).($results ? ': '.implode(', ', $results) : '').'.');
+
+        // So a dry run can't be mistaken for a full pass.
+        if ($this->option('dry-run')) {
+            $this->components->warn('Dry run: no emails were sent'.($this->apiChecks ? ', and the API checks only read' : '').". The mailer and queue weren't tested.");
+
+            return true;
+        }
 
         $driver = config('queue.connections.'.config('queue.default').'.driver', config('queue.default'));
 
@@ -191,6 +216,15 @@ class FormsCommand extends Command
         }
 
         return true;
+    }
+
+    private function sentVerb(): string
+    {
+        return match (true) {
+            $this->option('dry-run') => 'ready to send',
+            $this->option('now') => 'sent',
+            default => 'dispatched',
+        };
     }
 
     private function handles(string $to): array
@@ -422,7 +456,7 @@ class FormsCommand extends Command
     private function sendEmails(FormContract $form, array $emails, string $to, SiteObject $site, TestSubmission $submission): bool
     {
         // Checked before the swap below, which would hide a missing or broken address.
-        if (! $this->checkRecipients($form, $emails, $to, $site, $submission)) {
+        if (($real = $this->checkRecipients($form, $emails, $to, $site, $submission)) === null) {
             return false;
         }
 
@@ -444,6 +478,16 @@ class FormsCommand extends Command
 
                 return false;
             }
+        }
+
+        $merged = count($emails) > $swapped->count() ? ', covering '.count($emails).' that only differ by recipient' : '';
+
+        if ($this->option('dry-run')) {
+            $this->dispatched += $swapped->count();
+            $this->components->info($swapped->count()." email(s) for {$form->handle()} would go to {$to}"
+                .($real ? ' instead of '.implode(', ', $real) : '').$merged.'.');
+
+            return true;
         }
 
         // Changes the in-memory form only. Never save it, or the real recipients are overwritten.
@@ -472,11 +516,9 @@ class FormsCommand extends Command
         $this->dispatched += $swapped->count();
 
         $mailers = $swapped->pluck('mailer')->filter()->unique();
-        $merged = count($emails) - $swapped->count();
 
-        $this->components->info($swapped->count()." email(s) for {$form->handle()} ".($this->option('now') ? 'sent' : 'dispatched')." to {$to}"
-            .($mailers->isNotEmpty() ? ', using the form\'s '.$mailers->implode(', ').' mailer' : '')
-            .($merged ? ', covering '.count($emails).' that only differ by recipient' : '').'.');
+        $this->components->info($swapped->count()." email(s) for {$form->handle()} {$this->sentVerb()} to {$to}"
+            .($mailers->isNotEmpty() ? ', using the form\'s '.$mailers->implode(', ').' mailer' : '').$merged.'.');
 
         return true;
     }
@@ -502,9 +544,10 @@ class FormsCommand extends Command
 
     /**
      * Builds each email as it's configured, before the test address replaces its
-     * recipients, and checks the addresses it would really use.
+     * recipients, and checks the addresses it would really use. Returns them, or
+     * null if one is missing or broken.
      */
-    private function checkRecipients(FormContract $form, array $emails, string $to, SiteObject $site, TestSubmission $submission): bool
+    private function checkRecipients(FormContract $form, array $emails, string $to, SiteObject $site, TestSubmission $submission): ?array
     {
         $passed = true;
         $checked = [];
@@ -553,7 +596,7 @@ class FormsCommand extends Command
             $this->components->info("{$form->handle()}: checked, not emailed: ".collect($checked)->unique()->implode(', '));
         }
 
-        return $passed;
+        return $passed ? array_values(array_unique($checked)) : null;
     }
 
     private function isPlaceholder(string $address): bool
@@ -588,6 +631,8 @@ class FormsCommand extends Command
         }
 
         if ($integration->hasApiCheck()) {
+            $this->apiChecks++;
+
             try {
                 ReadOnlyRequests::run(fn () => $integration->listener()->canaryCheck($form->handle()), $blocked);
             } catch (Throwable $e) {

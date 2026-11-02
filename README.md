@@ -39,6 +39,9 @@ php artisan canary:forms --pick
 # Send as the French site on a multisite
 php artisan canary:forms contact --site=fr
 
+# Check everything and run the API checks, but send nothing
+php artisan canary:forms contact --dry-run
+
 # Send straight away instead of through the queue, so a mailer error fails the run
 php artisan canary:forms contact --now
 
@@ -57,6 +60,7 @@ The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#s
 | `--to` | The address that receives every test email. |
 | `--site` | Handle of the site to send as, on a multisite. Defaults to the default site. |
 | `--pick` | Choose forms from the list, even if some are saved or configured. |
+| `--dry-run` | Build and check every email and run the API checks, but send nothing. See [Dry run](#dry-run). |
 | `--now` | Send the emails straight away instead of through the queue, so a mailer or sender error fails the run. This doesn't test a queue worker. |
 | `-v` | List the real recipients of each email, which Canary checks but never emails. |
 | `--subscribe` | Also add the test address through each integration, then delete it. See [Subscribing a test contact](#subscribing-a-test-contact). |
@@ -131,6 +135,18 @@ Checkboxes and multi-selects get every option, so routing rules that match on th
 A run starts by naming the queue connection and mailer, then reports each form's emails and integration checks:
 
 ![A Canary run naming the queue and mailer, then reporting each form's emails and integration checks](art/canary-run.png)
+
+### Dry run
+
+`--dry-run` does everything up to sending. Canary builds each form's emails, renders their templates, checks the real recipients, and checks each integration, including its API check. Then it reports what it would have sent, instead of sending it:
+
+```
+INFO  1 email(s) for contact would go to you@example.com instead of hello@yoursite.com.
+```
+
+No email reaches a mailer or the queue, and no listener runs. API checks still run, as a revoked key or deleted list is one of the things worth catching, and they only read. The run ends by saying the mailer and queue weren't tested, so a dry run can't be mistaken for a full pass. It can't be combined with `--now` or `--subscribe`.
+
+Use it for a first run on a site you don't know, before anything is sent.
 
 ### Exit codes
 
@@ -412,7 +428,7 @@ Canary controls the recipients it hands to Statamic. Anything that changes recip
 - a custom `send_email_job` in `config/statamic/forms.php` that loads the form again or chooses its own recipients
 - a listener on Laravel's `MessageSending` event, or a mail provider rule, that adds a recipient (such as an automatic BCC) to every email the site sends
 
-On a site you don't know, check for these before running Canary. A trial run with `MAIL_MAILER=log` won't find them all: the log leaves out BCC addresses, a mail provider rule never runs, and a form email with its own `mailer` ignores that setting and sends as usual.
+On a site you don't know, start with `--dry-run`, which never hands an email to the mailer, and check for these before a real run. A trial run with `MAIL_MAILER=log` won't find them all: the log leaves out BCC addresses, a mail provider rule never runs, and a form email with its own `mailer` ignores that setting and sends as usual.
 
 ## What Canary doesn't check
 

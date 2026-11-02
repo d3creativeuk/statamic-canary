@@ -156,13 +156,54 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
-    public function a_form_with_nothing_to_test_warns_but_doesnt_fail()
+    public function a_form_with_nothing_to_test_warns_but_doesnt_fail_the_others()
+    {
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['contact', 'newsletter'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('newsletter has no emails or integrations, so there is nothing to test.')
+            ->expectsOutputToContain('Nothing to test in newsletter.')
+            ->expectsOutputToContain('Tested 1 form: 1 email dispatched.')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function a_broken_template_fails_before_anything_is_sent()
+    {
+        $this->makeForm('contact', [self::CLIENT_EMAIL, [...self::CLIENT_EMAIL, 'html' => 'emails/missing', 'subject' => 'Thanks']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("contact: the emails/missing template failed to render, so none of the form's emails were sent.")
+            ->assertFailed();
+
+        Mail::assertNothingSent();
+    }
+
+    #[Test]
+    public function emails_that_differ_by_more_than_recipient_are_each_sent()
+    {
+        $this->makeForm('contact', [
+            [...self::CLIENT_EMAIL, 'to' => 'sales@outer.test'],
+            [...self::CLIENT_EMAIL, 'to' => 'events@outer.test'],
+            [...self::CLIENT_EMAIL, 'to' => 'press@outer.test', 'reply_to' => 'press@outer.test'],
+        ]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain("2 email(s) for contact dispatched to me@example.com, using the form's smtp mailer, covering 3 that only differ by recipient.")
+            ->assertSuccessful();
+
+        Mail::assertSent(Email::class, 2);
+    }
+
+    #[Test]
+    public function a_run_that_tests_nothing_fails()
     {
         $this->makeForm('newsletter');
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
-            ->expectsOutputToContain('newsletter has no emails or integrations, so there is nothing to test.')
-            ->assertSuccessful();
+            ->expectsOutputToContain("Canary tested nothing, so it can't say any form works.")
+            ->assertFailed();
 
         Mail::assertNothingSent();
     }
@@ -301,7 +342,7 @@ class FormsCommandTest extends TestCase
     {
         $this->makeForm('contact', [self::CLIENT_EMAIL]);
         $this->makeForm('newsletter');
-        $this->makeForm('quote', [self::CLIENT_EMAIL, [...self::CLIENT_EMAIL, 'to' => '{{ business_email }}']]);
+        $this->makeForm('quote', [self::CLIENT_EMAIL, [...self::CLIENT_EMAIL, 'to' => '{{ business_email }}', 'subject' => 'Thanks for asking for a quote']]);
         $this->makeForm('reply', [[...self::CLIENT_EMAIL, 'to' => '{{ business_email }}']]);
 
         $this->artisan('canary:forms', ['--to' => 'me@example.com'])
@@ -454,7 +495,8 @@ class FormsCommandTest extends TestCase
             'files' => [['type' => 'files'], null],
             'integer' => [['type' => 'integer'], 1],
             'toggle' => [['type' => 'toggle'], true],
-            'checkboxes' => [['type' => 'checkboxes', 'options' => ['a' => 'A', 'b' => 'B']], ['a']],
+            'checkboxes' => [['type' => 'checkboxes', 'options' => ['a' => 'A', 'b' => 'B']], ['a', 'b']],
+            'multi-select' => [['type' => 'select', 'multiple' => true, 'options' => [['key' => 'a', 'value' => 'A'], ['key' => 'b', 'value' => 'B']]], ['a', 'b']],
             'select' => [['type' => 'select', 'options' => ['a', 'b']], 'a'],
             'radio' => [['type' => 'radio', 'options' => [['key' => 'a', 'value' => 'A']]], 'a'],
             'textarea' => [['type' => 'textarea'], 'Sent by Canary. Please ignore.'],
@@ -467,6 +509,13 @@ class FormsCommandTest extends TestCase
     {
         $this->assertSame('TEST form submission. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com', true));
         $this->assertSame('TEST form submission', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'text']), 'me@example.com', true));
+    }
+
+    #[Test]
+    public function client_facing_multi_value_samples_have_one_option()
+    {
+        $this->assertSame(['a'], $this->callPrivate('sampleValue', new Field('sample', ['type' => 'checkboxes', 'options' => ['a', 'b']]), 'me@example.com', true));
+        $this->assertSame(['a'], $this->callPrivate('sampleValue', new Field('sample', ['type' => 'select', 'multiple' => true, 'options' => ['a', 'b']]), 'me@example.com', true));
     }
 
     #[Test]

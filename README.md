@@ -39,6 +39,12 @@ php artisan canary:forms --pick
 # Send as the French site on a multisite
 php artisan canary:forms contact --site=fr
 
+# Send straight away instead of through the queue, so a mailer error fails the run
+php artisan canary:forms contact --now
+
+# List the real recipients Canary checked but didn't email
+php artisan canary:forms contact -v
+
 # Also add the test address to each integration, then delete it
 php artisan canary:forms newsletter --subscribe
 ```
@@ -51,6 +57,8 @@ The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#s
 | `--to` | The address that receives every test email. |
 | `--site` | Handle of the site to send as, on a multisite. Defaults to the default site. |
 | `--pick` | Choose forms from the list, even if some are saved or configured. |
+| `--now` | Send the emails straight away instead of through the queue, so a mailer or sender error fails the run. This doesn't test a queue worker. |
+| `-v` | List the real recipients of each email, which Canary checks but never emails. |
 | `--subscribe` | Also add the test address through each integration, then delete it. See [Subscribing a test contact](#subscribing-a-test-contact). |
 
 ### Picking forms from a list
@@ -112,17 +120,90 @@ Everything else, including the template, `from`, `reply_to` and `mailer`, is unc
 
 These changes are made to a copy of the form's settings in memory, never to the form itself. See [Canary doesn't change your site](#canary-doesnt-change-your-site).
 
+Before anything is sent, Canary checks each email:
+
+- **The template renders.** A missing or broken template fails the form, and none of its emails are sent.
+- **The real recipients are valid.** Canary reads each email's real `to` before replacing it. An empty or invalid address fails, as a missing setting or routing rule would stop the real email too. An address at `example.com`, `example.org` or `example.net`, including Laravel's default `hello@example.com` as the from address, gets a warning, as it usually means a setting fell back to its default.
+- **Each email is sent once.** Emails that only differ by recipient, such as one per staff routing rule, would all look the same at your test address, so Canary sends one and says how many it covers.
+
+Checkboxes and multi-selects get every option, so routing rules that match on them all fire.
+
 A run starts by naming the queue connection and mailer, then reports each form's emails and integration checks:
 
 ![A Canary run naming the queue and mailer, then reporting each form's emails and integration checks](art/canary-run.png)
 
 ### Exit codes
 
-The command exits non-zero if a form doesn't exist, its emails fail to dispatch or an integration check fails, so a deploy script can stop. A form with nothing to test shows a warning but doesn't fail the run.
+The command exits non-zero if a form doesn't exist, an email fails its checks or fails to dispatch, or an integration check fails, so a deploy script can stop.
+
+It also exits non-zero if the run tests nothing at all, because a run that sends nothing proves nothing. A form with nothing to test alongside others shows a warning but doesn't fail the run. Every run ends with a summary, such as "Tested 4 forms: 3 emails dispatched, 1 integration check passed."
+
+When the emails go through a real queue, the summary reminds you to check `php artisan queue:failed` if one doesn't arrive, since Canary only sees them dispatched. `--now` sends them during the run instead, so a mailer error fails it.
 
 Canary names the queue connection and queue the emails go on, so you know which worker has to run them. If the connection is `sync`, it warns you instead: the templates and sender are tested, but no queue worker is.
 
 It also names the mailer, and the form's own mailer when an email sets one. For `smtp` it adds the server, such as `127.0.0.1:2525`, so you can tell a mail provider from a local catcher like Herd's. If the mailer is `log` or `array`, Canary warns you that nothing is delivered.
+
+## Emails built in code
+
+Some sites don't set a form's emails in its settings. A listener builds them when the form is submitted, for example to choose staff recipients from the interests a visitor ticked:
+
+```php
+$event->submission->form()->email($emails);
+```
+
+Canary can't see those emails without running the listener, and running it would also do everything else the listener does, such as adding a lead to a CRM. So the listener tells Canary what it would send, with `canaryForms()` and `canaryEmails()`. Build the emails in one method, used by both the real path and Canary's, so the two can't drift apart:
+
+```php
+<?php
+
+namespace App\Listeners;
+
+use Statamic\Contracts\Forms\Submission;
+use Statamic\Events\SubmissionCreated;
+
+class HandleFormSubmissions
+{
+    public function handle(SubmissionCreated $event): void
+    {
+        $form = $event->submission->form();
+
+        if ($form->handle() === 'enquiry') {
+            $form->email($this->enquiryEmails($event->submission));
+        }
+    }
+
+    public function canaryForms(): array
+    {
+        return ['enquiry' => ['email', 'interests']];
+    }
+
+    public function canaryEmails(string $form, Submission $submission): array
+    {
+        return $form === 'enquiry' ? $this->enquiryEmails($submission) : [];
+    }
+
+    private function enquiryEmails(Submission $submission): array
+    {
+        $staff = collect(config('enquiries.routing'))
+            ->filter(fn ($to, $interest) => in_array($interest, (array) $submission->get('interests')))
+            ->map(fn ($to) => ['to' => $to, 'subject' => 'New enquiry', 'html' => 'emails/enquiry']);
+
+        return [
+            ...$staff->values(),
+            ['to' => $submission->get('email'), 'subject' => 'Thanks for your enquiry', 'html' => 'emails/enquiry-reply'],
+        ];
+    }
+}
+```
+
+`canaryEmails()` returns emails in the same shape as a form's email settings, and Canary tests them exactly like emails from the settings: each one goes to your test address with a `TEST: ` subject, after the checks above. When it returns any emails, they replace the form's own settings, as they would on a real submission. If the listener adds to the settings instead, return both.
+
+- **It must only build the emails.** Don't send, save or call a service from it. Canary passes a submission that can't be saved, and blocks any request through Laravel's HTTP client that isn't a GET.
+- **A listener that only builds emails isn't listed as an integration.** Add `canaryName()` and `canaryCheck()` if it also sends to a service.
+- **Links built from a submission's ID won't work** in the test emails, because the submission is never saved.
+
+Without `canaryEmails()`, Canary doesn't report the form as having nothing to test. When it can tell which forms a listener handles, the list shows `enquiry - emails built in App\Listeners\HandleFormSubmissions, add canaryEmails()`. When it can't, a form with nothing in its settings shows `nothing in the form's settings, App\Listeners\HandleFormSubmissions may handle it`. The run warns the same way.
 
 ## Checking integrations
 
@@ -135,8 +216,13 @@ For the full check, a listener tells Canary about itself through a few plain met
 | `canaryForms(): array` | Each form the listener handles, and the fields it reads: `['contact' => ['email']]`. |
 | `canaryName(): string` | The name shown in the list and the output, such as `MailerLite`. Defaults to the class name. |
 | `canaryCheck(string $form): void` | A read-only API call that throws if something's wrong, such as a bad API key or a deleted list. |
+| `canaryEmails(string $form, Submission $submission): array` | The emails the listener builds for the form. See [Emails built in code](#emails-built-in-code). |
 | `canaryContact(string $form, string $email): ?string` | The ID of the contact with this email address, or `null`. Only needed for `--subscribe`. |
 | `canaryDelete(string $form, string $id): void` | Deletes that contact. Only needed for `--subscribe`. |
+
+**A check must only read.** It must never refresh or rewrite a stored token, add a contact or change a setting. While `canaryCheck()` runs, Canary blocks any request through Laravel's HTTP client that isn't a GET or HEAD, and fails the check even if the listener catches the error. A token refresh is a POST, so it would be blocked. SDKs with their own HTTP client, such as MailerLite's, aren't covered, so the rule is still yours to keep.
+
+To tell Canary to leave a listener alone, return `[]` from its `canaryForms()`.
 
 ### MailerLite example
 
@@ -281,7 +367,7 @@ That's enough to check the listener is registered and the form still has its fie
 WARN  Canary can't tell which forms App\Listeners\ActiveCampaignSubscriber handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.
 ```
 
-Listeners from a package and closure listeners get their own warning, since you can't add methods to them. When Canary does find a package listener's forms, it names the listener after its addon or package, such as `acorn - Acorn`, and checks the registration and fields without pointing you here.
+Listeners from a package and closure listeners get their own warning, since you can't add methods to them. When Canary does find a package listener's forms, it names the listener after its addon or package, such as `acorn - Acorn`, and checks the registration and fields without pointing you here. A listener that only rejects submissions, such as a reCAPTCHA check that throws a `ValidationException`, isn't an integration, so Canary leaves it out.
 
 For each integration on a form, a normal run checks that:
 
@@ -315,7 +401,7 @@ Canary never edits your forms, templates, config or content.
 
 - **Form settings.** Canary loads the form and swaps the recipients on that loaded copy, in memory, for the length of the run. The form's file is never written, so the next real submission goes to the real recipients as usual.
 - **Submissions.** None are saved, even for forms that store submissions or accept file uploads.
-- **Integrations.** `FormSubmitted` and `SubmissionCreated` aren't fired, so newsletter, CRM and other form listeners don't run. Integration checks are read-only. Only `--subscribe` adds anything to a service, and it deletes the contact afterwards.
+- **Integrations.** `FormSubmitted` and `SubmissionCreated` aren't fired, so newsletter, CRM and other form listeners don't run. Integration checks are read-only, and Canary blocks any request through Laravel's HTTP client during a check that isn't a GET or HEAD. Only `--subscribe` adds anything to a service, and it deletes the contact afterwards.
 
 The only file Canary writes is `resources/addons/statamic-canary.yaml`, and only when you choose to save your picked forms.
 

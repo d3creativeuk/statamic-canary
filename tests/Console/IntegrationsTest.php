@@ -6,12 +6,14 @@ use Composer\Autoload\ClassLoader;
 use D3Creative\Canary\Tests\Fixtures\App\Listeners\PlainListener;
 use D3Creative\Canary\Tests\Fixtures\ContactToActiveCampaign;
 use D3Creative\Canary\Tests\Fixtures\FakeCrm;
+use D3Creative\Canary\Tests\Fixtures\OptedOut;
 use D3Creative\Canary\Tests\TestCase;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Test;
@@ -93,6 +95,31 @@ class IntegrationsTest extends TestCase
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
             ->expectsOutputToContain('newsletter: FakeCRM check failed: Unauthenticated.')
             ->assertFailed();
+    }
+
+    #[Test]
+    public function a_check_that_writes_fails_even_if_it_catches_the_error()
+    {
+        Http::fake();
+        FakeCrm::$checkWrites = true;
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('newsletter: FakeCRM check failed: it made a POST accounts.fakecrm.test request, which Canary blocked. A check must only read.')
+            ->assertFailed();
+
+        Http::assertNothingSent();
+    }
+
+    #[Test]
+    public function a_listener_can_opt_out_with_no_forms()
+    {
+        $this->makeForm('contact', [self::EMAIL]);
+        Event::listen(FormSubmitted::class, OptedOut::class);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->doesntExpectOutputToContain('OptedOut')
+            ->assertSuccessful();
     }
 
     #[Test]

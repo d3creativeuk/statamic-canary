@@ -9,6 +9,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use ReflectionClass;
+use Statamic\Contracts\Forms\Submission;
 use Statamic\Events\FormSubmitted;
 use Statamic\Events\SubmissionCreated;
 use Statamic\Facades\Addon;
@@ -21,11 +22,14 @@ use Throwable;
  *   canaryForms(): array                                 form handle => fields it reads (required)
  *   canaryName(): string                                 e.g. 'MailerLite'
  *   canaryCheck(string $form): void                      a read-only API call that throws on failure
+ *   canaryEmails(string $form, Submission $s): array     the emails it builds, as $form->email() returns them
  *   canaryContact(string $form, string $email): ?string  the contact's ID in the account, or null
  *   canaryDelete(string $form, string $id): void         deletes that contact
  *
  * The last two are needed for --subscribe. Without canaryForms(), Canary reads
  * the listener's code instead (ListenerSource), which can't give an API check.
+ * A listener with canaryEmails() and no name or check only builds emails, so
+ * it isn't listed as an integration.
  */
 class Integration
 {
@@ -38,6 +42,8 @@ class Integration
     ) {}
 
     private ?array $forms = null;
+
+    private ?ListenerSource $source = null;
 
     /**
      * Listeners registered for a form event, plus any in app/Listeners that
@@ -70,7 +76,9 @@ class Integration
         return collect(self::EVENTS)
             ->flatMap(fn ($event) => collect(Event::getRawListeners()[$event] ?? [])
                 ->map(fn ($listener) => self::parse($listener, $event)))
-            ->reject(fn (?self $integration) => $integration?->knownForms())
+            // A listener with canaryForms() is never unknown, so returning [] opts it out.
+            ->reject(fn (?self $integration) => $integration?->configured() || $integration?->knownForms())
+            ->reject(fn (?self $integration) => $integration && $integration->source()->isValidator())
             ->map(fn (?self $integration) => $integration?->class)
             ->unique()
             ->values();
@@ -144,7 +152,46 @@ class Integration
             return $this->addon() ?? $package;
         }
 
-        return $this->configured() ? class_basename($this->class) : (ListenerSource::fromClass($this->class)->service() ?? class_basename($this->class));
+        return $this->configured() ? class_basename($this->class) : ($this->source()->service() ?? class_basename($this->class));
+    }
+
+    /**
+     * Whether the listener builds the form's emails and tells Canary about them.
+     */
+    public function buildsEmails(): bool
+    {
+        return method_exists($this->class, 'canaryEmails');
+    }
+
+    /**
+     * Whether it builds emails Canary can't see, because it has no canaryEmails().
+     */
+    public function buildsHiddenEmails(): bool
+    {
+        return ! $this->buildsEmails() && $this->source()->buildsEmails();
+    }
+
+    /**
+     * Builds emails and does nothing Canary can check, so it isn't an integration.
+     */
+    public function onlyBuildsEmails(): bool
+    {
+        return $this->buildsEmails() && ! $this->hasApiCheck() && ! method_exists($this->class, 'canaryName');
+    }
+
+    /**
+     * The emails it builds for an unsaved submission, as $form->email() returns them.
+     */
+    public function emails(string $form, Submission $submission): array
+    {
+        $emails = $this->listener()->canaryEmails($form, $submission) ?? [];
+
+        return isset($emails['to']) ? [$emails] : array_values($emails);
+    }
+
+    public function source(): ListenerSource
+    {
+        return $this->source ??= ListenerSource::fromClass($this->class);
     }
 
     /**
@@ -156,7 +203,7 @@ class Integration
             ? collect($this->listener()->canaryForms())
                 ->mapWithKeys(fn ($fields, $form) => is_int($form) ? [$fields => []] : [$form => Arr::wrap($fields)])
                 ->all()
-            : ListenerSource::fromClass($this->class)->forms();
+            : $this->source()->forms();
     }
 
     public function handles(string $form): bool

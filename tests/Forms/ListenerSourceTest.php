@@ -81,6 +81,23 @@ class ListenerSourceTest extends TestCase
         $this->assertNull($this->source('Log::info("hi");')->service());
     }
 
+    #[Test]
+    public function it_spots_a_listener_that_builds_emails()
+    {
+        $this->assertTrue($this->source("\$event->submission->form()->email([['to' => 'a@b.com']]);")->buildsEmails());
+        $this->assertTrue($this->source('$form->email($emails);')->buildsEmails());
+        $this->assertFalse($this->source('$emails = $event->submission->form()->email();')->buildsEmails());
+        $this->assertFalse($this->source('// $form->email($emails);')->buildsEmails());
+    }
+
+    #[Test]
+    public function it_spots_a_validator()
+    {
+        $this->assertTrue($this->source('throw ValidationException::withMessages([]);')->isValidator());
+        $this->assertFalse($this->source('throw ValidationException::withMessages([]); $mailchimp->add();')->isValidator());
+        $this->assertFalse($this->source('$event->submission->save();')->isValidator());
+    }
+
     private function source(string $body): ListenerSource
     {
         return new ListenerSource("<?php\nuse Statamic\\Events\\FormSubmitted;\nclass Listener {\npublic function handle(FormSubmitted \$event) {\n{$body}\n}\n}");

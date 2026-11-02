@@ -21,6 +21,9 @@ abstract class TestCase extends AddonTestCase
         $app['config']->set('statamic.forms.forms', $this->contentPath('forms'));
         $app['config']->set('statamic.system.blueprints_path', $this->contentPath('blueprints'));
         $app['config']->set('statamic.stache.stores.form-submissions.directory', $this->contentPath('submissions'));
+
+        // Canary renders each email before dispatching it, so form emails need real templates.
+        $app['config']->set('view.paths', [__DIR__.'/Fixtures/views', ...$app['config']->get('view.paths', [])]);
     }
 
     protected function tearDown(): void

@@ -6,6 +6,38 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Added
+
+- **Emails built in code.** A listener that sets a form's emails when it's submitted can tell
+  Canary about them with `canaryEmails()`. They replace the form's own settings, as on a real
+  submission, and go to the test address like any other form email. A listener that only builds
+  emails isn't listed as an integration.
+- **Each email is checked before it's sent.** Its template must render, and its real recipients,
+  read before the test address replaces them, must be valid email addresses. A placeholder
+  address such as `hello@example.com` gets a warning. `-v` lists the real recipients.
+- **`--now`** sends the emails during the run instead of through the queue, so a mailer error
+  fails it.
+- **A summary at the end of every run**, and a reminder to check `queue:failed` when the emails
+  went through a real queue.
+- **Checks and `canaryEmails()` can only read.** Canary blocks any request through Laravel's HTTP
+  client that isn't a GET or HEAD while they run, such as a token refresh, and fails the check
+  even if the listener catches the error.
+
+### Changed
+
+- **A run that tests nothing at all now exits non-zero.** It used to warn and exit 0, which looked
+  like a pass. A form with nothing to test alongside others still only warns.
+- **A form isn't reported as having nothing to test when a listener might handle it.** The list
+  names a listener that builds emails without `canaryEmails()`, or one whose forms Canary can't
+  tell.
+- **Emails that only differ by recipient are sent once**, saying how many they cover.
+- **Checkboxes and multi-selects get every option** in test emails, so routing rules all fire.
+  Data sent to a real service with `--subscribe` still gets one.
+- **Validators, such as a reCAPTCHA listener, aren't warned about**, and a listener whose
+  `canaryForms()` returns `[]` is left alone.
+
 ## [1.1.1] - 2026-11-02
 
 ### Fixed

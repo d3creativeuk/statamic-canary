@@ -48,6 +48,24 @@ class ListenerSource
         return array_fill_keys($handles, count($handles) === 1 ? $this->fields() : []);
     }
 
+    /**
+     * Whether it sets a form's emails, as in $submission->form()->email([...]).
+     * The getter, ->email(), takes no argument and is left out.
+     */
+    public function buildsEmails(): bool
+    {
+        return (bool) preg_match('/->email\(\s*[^\s)]/', $this->code);
+    }
+
+    /**
+     * A listener that rejects submissions, such as a reCAPTCHA check, rather
+     * than sending them anywhere.
+     */
+    public function isValidator(): bool
+    {
+        return str_contains($this->code, 'ValidationException') && ! $this->service();
+    }
+
     public function service(): ?string
     {
         foreach (self::SERVICES as $service) {

@@ -2,8 +2,10 @@
 
 namespace D3Creative\Canary\Tests\Fixtures;
 
+use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Statamic\Events\FormSubmitted;
+use Throwable;
 
 /**
  * Stands in for a listener like MailerLiteSubscriber, with an in-memory CRM.
@@ -25,6 +27,9 @@ class FakeCrm
 
     public static bool $failDelete = false;
 
+    /** Makes canaryCheck() try to write, then swallow the error. */
+    public static bool $checkWrites = false;
+
     /** Add the contact from a job: true for the default connection, or a connection to force. */
     public static bool|string $viaJob = false;
 
@@ -32,7 +37,7 @@ class FakeCrm
     {
         static::$contacts = static::$received = static::$checked = static::$deleted = [];
         static::$failCheck = null;
-        static::$dropSubmissions = static::$failDelete = static::$viaJob = false;
+        static::$dropSubmissions = static::$failDelete = static::$viaJob = static::$checkWrites = false;
     }
 
     public function handle(FormSubmitted $event): void
@@ -70,6 +75,14 @@ class FakeCrm
     public function canaryCheck(string $form): void
     {
         static::$checked[] = $form;
+
+        if (static::$checkWrites) {
+            try {
+                Http::post('https://accounts.fakecrm.test/oauth/token');
+            } catch (Throwable) {
+                // Carries on as if the check passed.
+            }
+        }
 
         if (static::$failCheck) {
             throw new RuntimeException(static::$failCheck);

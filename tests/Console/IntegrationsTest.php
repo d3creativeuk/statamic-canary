@@ -8,9 +8,12 @@ use D3Creative\Canary\Tests\Fixtures\ContactToActiveCampaign;
 use D3Creative\Canary\Tests\Fixtures\FakeCrm;
 use D3Creative\Canary\Tests\TestCase;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionProperty;
 use Statamic\Events\FormSubmitted;
@@ -145,6 +148,36 @@ class IntegrationsTest extends TestCase
     }
 
     #[Test]
+    public function subscribe_runs_the_listeners_jobs_before_checking()
+    {
+        $this->useDatabaseQueue();
+        FakeCrm::$viaJob = true;
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--subscribe' => true])
+            ->expectsOutputToContain('newsletter: FakeCRM check passed. Test contact added and deleted.')
+            ->assertSuccessful();
+
+        $this->assertSame(0, DB::table('jobs')->count());
+        $this->assertSame('database', config('queue.default'));
+    }
+
+    #[Test]
+    public function subscribe_fails_when_a_job_forces_a_real_queue()
+    {
+        $this->useDatabaseQueue();
+        FakeCrm::$viaJob = 'database';
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--subscribe' => true])
+            ->expectsOutputToContain('newsletter: FakeCRM: the listener queued a job on the database connection, so the test contact arrives after Canary has checked. Once a worker runs it, delete me@example.com from the account by hand.')
+            ->assertFailed();
+
+        $this->assertSame(1, DB::table('jobs')->count());
+        $this->assertSame([], FakeCrm::$deleted);
+    }
+
+    #[Test]
     public function subscribe_wont_touch_an_existing_contact()
     {
         FakeCrm::$contacts = ['me@example.com' => 'real-contact'];
@@ -264,6 +297,26 @@ class IntegrationsTest extends TestCase
             $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
                 ->expectsOutputToContain("contact: Acme CRM check passed. It's an addon, so only its registration and fields were checked.")
                 ->assertSuccessful();
+        });
+    }
+
+    private function useDatabaseQueue(): void
+    {
+        config([
+            'database.default' => 'testing',
+            'database.connections.testing' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''],
+            'queue.default' => 'database',
+            'queue.connections.database' => ['driver' => 'database', 'connection' => 'testing', 'table' => 'jobs', 'queue' => 'default', 'retry_after' => 90],
+        ]);
+
+        Schema::create('jobs', function (Blueprint $table) {
+            $table->id();
+            $table->string('queue')->index();
+            $table->longText('payload');
+            $table->unsignedTinyInteger('attempts');
+            $table->unsignedInteger('reserved_at')->nullable();
+            $table->unsignedInteger('available_at');
+            $table->unsignedInteger('created_at');
         });
     }
 

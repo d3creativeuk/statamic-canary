@@ -25,11 +25,14 @@ class FakeCrm
 
     public static bool $failDelete = false;
 
+    /** Add the contact from a job: true for the default connection, or a connection to force. */
+    public static bool|string $viaJob = false;
+
     public static function reset(): void
     {
         static::$contacts = static::$received = static::$checked = static::$deleted = [];
         static::$failCheck = null;
-        static::$dropSubmissions = static::$failDelete = false;
+        static::$dropSubmissions = static::$failDelete = static::$viaJob = false;
     }
 
     public function handle(FormSubmitted $event): void
@@ -43,7 +46,13 @@ class FakeCrm
         // Real listeners often save the submission, e.g. to store a status.
         $event->submission->set('crm_status', 'created')->save();
 
-        if (! static::$dropSubmissions) {
+        if (static::$viaJob) {
+            $job = AddToFakeCrm::dispatch($event->submission->get('business_email'));
+
+            if (is_string(static::$viaJob)) {
+                $job->onConnection(static::$viaJob);
+            }
+        } elseif (! static::$dropSubmissions) {
             static::$contacts[$event->submission->get('business_email')] = 'contact-1';
         }
     }

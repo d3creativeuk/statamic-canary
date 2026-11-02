@@ -379,7 +379,13 @@ class FormsCommand extends Command
                 return false;
             }
 
-            $integration->run((new TestSubmission)->form($form)->data($this->sampleData($form, $to, clientFacing: true)));
+            $queued = $integration->run((new TestSubmission)->form($form)->data($this->sampleData($form, $to, clientFacing: true)));
+
+            if ($queued) {
+                $this->components->error("{$label}: the listener queued a job on the ".implode(', ', $queued).' connection, so the test contact arrives after Canary has checked. Once a worker runs it, delete '.$to.' from the account by hand.');
+
+                return false;
+            }
 
             if (! $id = $listener->canaryContact($form->handle(), $to)) {
                 $this->components->error("{$label}: the test contact never arrived. Check the site's logs, as the listener's own checks, such as a rate limit, may have stopped it.");

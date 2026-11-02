@@ -6,6 +6,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Fixed
+
+- **`--subscribe` no longer leaves a contact behind when the listener uses a job.** Jobs the
+  listener dispatches now run straight away, so the contact exists before Canary checks for it
+  and deletes it. If a job forces a real queue connection anyway, Canary fails and says to
+  delete the test address by hand once a worker has run it.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added

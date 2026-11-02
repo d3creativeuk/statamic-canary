@@ -3,6 +3,7 @@
 namespace D3Creative\Canary\Forms;
 
 use Composer\Autoload\ClassLoader;
+use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
@@ -202,10 +203,34 @@ class Integration
 
     /**
      * Runs this listener alone, not the event, so the site's other listeners don't run.
+     *
+     * Jobs it dispatches run straight away on the sync queue, so the contact exists
+     * before Canary checks for it and deletes it. Returns the connections of any job
+     * that forced a real queue anyway, since that contact arrives after Canary has looked.
      */
-    public function run(TestSubmission $submission): void
+    public function run(TestSubmission $submission): array
     {
-        $this->listener()->{$this->method}(new ($this->event)($submission));
+        $default = config('queue.default');
+        $queued = [];
+        $running = true;
+
+        // Dispatchers can't forget one listener, so this one switches itself off.
+        Event::listen(JobQueued::class, function (JobQueued $event) use (&$queued, &$running) {
+            if ($running) {
+                $queued[] = $event->connectionName;
+            }
+        });
+
+        config(['queue.default' => 'sync']);
+
+        try {
+            $this->listener()->{$this->method}(new ($this->event)($submission));
+        } finally {
+            config(['queue.default' => $default]);
+            $running = false;
+        }
+
+        return array_values(array_unique($queued));
     }
 
     /**

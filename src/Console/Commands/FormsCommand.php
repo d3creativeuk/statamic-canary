@@ -269,8 +269,7 @@ class FormsCommand extends Command
         $this->heading('Queue');
 
         try {
-            $failed = app('queue.failer');
-            $count = method_exists($failed, 'count') ? $failed->count() : count($failed->all());
+            $jobs = collect(app('queue.failer')->all());
         } catch (Throwable $e) {
             // Database errors include the connection details and the query, which only add noise here.
             $this->components->twoColumnDetail('Failed jobs', "<fg=yellow>couldn't be read</>: ".Str::before($e->getMessage(), ' (Connection:'));
@@ -278,9 +277,31 @@ class FormsCommand extends Command
             return;
         }
 
-        $count
-            ? $this->components->warn("{$count} failed ".Str::plural('job', $count).'. Run php artisan queue:failed to see whether any are form emails.')
-            : $this->components->twoColumnDetail('Failed jobs', 'none');
+        if ($jobs->isEmpty()) {
+            $this->components->twoColumnDetail('Failed jobs', 'none');
+
+            return;
+        }
+
+        // A failed form email is an enquiry that never arrived. Other failed jobs, such as cache
+        // warming, don't affect forms, so they're counted but not warned about.
+        $emails = $jobs->filter(fn ($job) => in_array(
+            json_decode($job->payload ?? '{}', true)['displayName'] ?? null,
+            array_unique([SendEmail::class, config('statamic.forms.send_email_job', SendEmail::class)]),
+        ));
+
+        $total = $jobs->count().' failed '.Str::plural('job', $jobs->count());
+
+        if ($emails->isEmpty()) {
+            $this->components->twoColumnDetail('Failed jobs', "{$total}, none of them form emails");
+
+            return;
+        }
+
+        $dates = $emails->map(fn ($job) => Str::before((string) ($job->failed_at ?? ''), ' '))->filter()->unique()->implode(', ');
+
+        $this->components->warn("{$total}, {$emails->count()} of them ".($emails->count() === 1 ? 'a form email' : 'form emails').($dates ? " ({$dates})" : '')
+            .". Each is an email that never arrived. Run php artisan queue:failed to see them, and don't retry one without asking the client, as it goes to the real recipients.");
     }
 
     private function heading(string $text): void
@@ -794,6 +815,9 @@ class FormsCommand extends Command
 
             $label = "{$form->handle()}: the \"{$mail->subject}\" email";
             $recipients = collect($mail->to)->pluck('address')->filter();
+            // Removed from the test email, but the real one still goes to them, so they're checked too.
+            $copies = collect(['cc' => $mail->cc, 'bcc' => $mail->bcc])
+                ->flatMap(fn ($addresses, $kind) => collect($addresses)->pluck('address')->filter()->map(fn ($address) => [$kind, $address]));
             $senders = collect($mail->from)->pluck('address')->filter()->whenEmpty(fn ($from) => $from->push(config('mail.from.address')))->filter();
 
             if ($recipients->isEmpty()) {
@@ -806,6 +830,12 @@ class FormsCommand extends Command
                 $passed = false;
             }
 
+            // An invalid copy address stops the real email sending, even though the test one has none.
+            foreach ($copies->reject(fn ($copy) => filter_var($copy[1], FILTER_VALIDATE_EMAIL)) as [$kind, $address]) {
+                $this->components->error("{$label} would {$kind} \"{$address}\", which isn't an email address.");
+                $passed = false;
+            }
+
             if ($senders->isEmpty()) {
                 $this->components->error("{$label} has no from address, and neither has the mail config.");
                 $passed = false;
@@ -814,11 +844,11 @@ class FormsCommand extends Command
             // The sample fills email fields with $to, so an auto-reply's address isn't a real one.
             $real = $recipients->reject(fn ($address) => strcasecmp($address, $to) === 0);
 
-            foreach ($real->merge($senders)->filter(fn ($address) => $this->isPlaceholder($address))->unique() as $address) {
+            foreach ($real->merge($senders)->merge($copies->pluck(1))->filter(fn ($address) => $this->isPlaceholder($address))->unique() as $address) {
                 $this->components->warn("{$label} uses {$address}, which looks like a placeholder. Check the setting it comes from.");
             }
 
-            array_push($checked, ...$real);
+            array_push($checked, ...$real, ...$copies->map(fn ($copy) => "{$copy[0]} {$copy[1]}"));
         }
 
         if ($checked && $this->output->isVerbose()) {

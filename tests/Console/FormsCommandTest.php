@@ -170,6 +170,29 @@ class FormsCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_lists_and_checks_the_cc_and_bcc_it_removes()
+    {
+        $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'cc' => 'manager@outer.test', 'bcc' => 'archive@outer.test']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com', '--dry-run' => true, '-v' => true])
+            ->expectsOutputToContain('contact: checked, not emailed: client@example.com, cc manager@outer.test, bcc archive@outer.test')
+            ->expectsOutputToContain('would go to me@example.com instead of client@example.com, cc manager@outer.test, bcc archive@outer.test.')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function an_invalid_cc_fails_as_it_would_stop_the_real_email()
+    {
+        $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'cc' => 'manager']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('would cc "manager", which isn\'t an email address.')
+            ->assertFailed();
+
+        Mail::assertNothingSent();
+    }
+
+    #[Test]
     public function a_broken_template_fails_before_anything_is_sent()
     {
         $this->makeForm('contact', [self::CLIENT_EMAIL, [...self::CLIENT_EMAIL, 'html' => 'emails/missing', 'subject' => 'Thanks']]);

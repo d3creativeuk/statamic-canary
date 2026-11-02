@@ -6,6 +6,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Changed
+
+- **The real `cc` and `bcc` are checked and listed.** Canary removes them from test emails, but
+  the real email still goes to them, so an invalid one fails the run and `-v` and `--dry-run`
+  show them alongside the `to` address.
+- **`--scan` picks out failed form emails** from other failed jobs, with the date each failed,
+  as each is an enquiry that never arrived. Other failed jobs, such as cache warming, are only
+  counted.
+
 ## [1.3.0] - 2026-11-02
 
 ### Added

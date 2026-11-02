@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\Test;
 use Statamic\Events\FormSubmitted;
 use Statamic\Events\SubmissionCreated;
+use Statamic\Forms\SendEmail;
 
 class ScanTest extends TestCase
 {
@@ -91,19 +92,43 @@ class ScanTest extends TestCase
     }
 
     #[Test]
-    public function it_counts_failed_jobs()
+    public function it_picks_out_failed_form_emails()
     {
-        $this->app->instance('queue.failer', new class extends NullFailedJobProvider
-        {
-            public function count($connection = null, $queue = null)
-            {
-                return 3;
-            }
-        });
+        $this->failedJobs(['Statamic\\Console\\Commands\\StaticWarmJob', SendEmail::class, 'Statamic\\Listeners\\GeneratePresetImageManipulations']);
 
         $this->artisan('canary:forms', ['--scan' => true])
-            ->expectsOutputToContain('3 failed jobs. Run php artisan queue:failed to see whether any are form emails.')
+            ->expectsOutputToContain('3 failed jobs, 1 of them a form email (2025-04-09). Each is an email that never arrived.')
             ->assertSuccessful();
+    }
+
+    #[Test]
+    public function other_failed_jobs_arent_warned_about()
+    {
+        $this->failedJobs(['Statamic\\Console\\Commands\\StaticWarmJob', 'Statamic\\Console\\Commands\\StaticWarmJob']);
+
+        $this->artisan('canary:forms', ['--scan' => true])
+            ->expectsOutputToContain('2 failed jobs, none of them form emails')
+            ->doesntExpectOutputToContain('never arrived')
+            ->assertSuccessful();
+    }
+
+    /**
+     * Stands in for the failed job store, with one job of each class, failed on 9 April 2025.
+     */
+    private function failedJobs(array $classes): void
+    {
+        $this->app->instance('queue.failer', new class($classes) extends NullFailedJobProvider
+        {
+            public function __construct(private array $classes) {}
+
+            public function all()
+            {
+                return array_map(fn ($class) => (object) [
+                    'payload' => json_encode(['displayName' => $class]),
+                    'failed_at' => '2025-04-09 05:48:08',
+                ], $this->classes);
+            }
+        });
     }
 
     #[Test]

@@ -66,7 +66,7 @@ The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#s
 | `--scan` | List the site's form listeners, anything that could email someone else, each form's emails and failed jobs, without testing anything. See [Scanning a site](#scanning-a-site). |
 | `--dry-run` | Build and check every email and run the API checks, but send nothing. See [Dry run](#dry-run). |
 | `--now` | Send the emails straight away instead of through the queue, so a mailer or sender error fails the run. This doesn't test a queue worker. |
-| `-v` | List the real recipients of each email, which Canary checks but never emails. |
+| `-v` | List the real recipients of each email, including any `cc` and `bcc`, which Canary checks but never emails. |
 | `--subscribe` | Also add the test address through each integration, then delete it. See [Subscribing a test contact](#subscribing-a-test-contact). |
 
 ### Picking forms from a list
@@ -131,7 +131,7 @@ These changes are made to a copy of the form's settings in memory, never to the 
 Before anything is sent, Canary checks each email:
 
 - **The template renders.** A missing or broken template fails the form, and none of its emails are sent.
-- **The real recipients are valid.** Canary reads each email's real `to` before replacing it. An empty or invalid address fails, as a missing setting or routing rule would stop the real email too. An address at `example.com`, `example.org` or `example.net`, including Laravel's default `hello@example.com` as the from address, gets a warning, as it usually means a setting fell back to its default.
+- **The real recipients are valid.** Canary reads each email's real `to`, `cc` and `bcc` before replacing them. An empty `to`, or any invalid address, fails, as a missing setting or routing rule would stop the real email too. An address at `example.com`, `example.org` or `example.net`, including Laravel's default `hello@example.com` as the from address, gets a warning, as it usually means a setting fell back to its default.
 - **Its mailer can be created.** Canary creates each email's mailer, or the default one, without sending anything. A mailer whose transport package was removed, or a `MAIL_MAILER` with a typo, fails here instead of later in the queue worker.
 - **Each email is sent once.** Emails that only differ by recipient, such as one per staff routing rule, would all look the same at your test address, so Canary sends one and says how many it covers.
 
@@ -148,7 +148,7 @@ A run starts by naming the queue connection and mailer, then reports each form's
 - **Every form listener**, registered or not: the forms it handles, the services its code names, whether it builds emails in code, and which Canary methods it has. Validators, package listeners and closures are labelled.
 - **Anything that could email someone else**, from [What could still email someone else](#what-could-still-email-someone-else): a custom `send_email_job`, a listener on Laravel's `MessageSending` event, or a global `mail.to` address. A closure is named by the file it's in, so a package's hook, such as Laravel Nightwatch's, can be told apart from the site's own.
 - **Each form's emails**, with any `cc`, `bcc` or mailer of their own, and the listeners that handle the form.
-- **Failed jobs** waiting in the queue, which are often the first sign a form has stopped sending.
+- **Failed jobs** waiting in the queue. Failed form emails are picked out with the date they failed, as each is an enquiry that never arrived. Other failed jobs, such as cache warming, are only counted.
 
 It only reports, so it always exits 0. On an unfamiliar site, run `--scan`, then `--dry-run`, then a real run.
 

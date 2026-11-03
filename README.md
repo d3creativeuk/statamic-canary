@@ -7,7 +7,7 @@ The usual way to check a live form is to submit it. That saves a submission, sig
 Canary sends a form's **real** emails (its own template, subject, from address and mailer) to **one test address**, through the **real queue**. It doesn't save a submission or run the form's listeners, so newsletter and CRM integrations never see it, and it never changes the form itself.
 
 ```bash
-php artisan canary:forms contact quote --to=you@example.com
+php artisan canary:forms --to=you@example.com
 ```
 
 If the emails arrive, the templates, sender, mail provider and queue worker are all working.

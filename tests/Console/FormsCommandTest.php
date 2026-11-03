@@ -4,10 +4,12 @@ namespace D3Creative\Canary\Tests\Console;
 
 use D3Creative\Canary\Console\Commands\FormsCommand;
 use D3Creative\Canary\Tests\TestCase;
+use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Testing\Fakes\MailFake;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionMethod;
@@ -332,6 +334,38 @@ class FormsCommandTest extends TestCase
             ->assertFailed();
 
         Mail::assertNothingSent();
+    }
+
+    #[Test]
+    public function a_mailer_whose_transport_a_package_registers_can_be_created()
+    {
+        // Registered the way mailersend/laravel-driver does, on the site's own manager.
+        Mail::extend('package-transport', fn () => new ArrayTransport);
+        config(['mail.mailers.package' => ['transport' => 'package-transport']]);
+        $this->makeForm('contact', [[...self::CLIENT_EMAIL, 'mailer' => 'package']]);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com', '--dry-run' => true])
+            ->doesntExpectOutputToContain("can't be created")
+            ->assertSuccessful();
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->doesntExpectOutputToContain("can't be created")
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function checking_a_mailer_leaves_the_sites_mailers_alone()
+    {
+        $this->makeForm('contact', [self::CLIENT_EMAIL]);
+
+        $manager = app('mail.manager');
+        $manager = $manager instanceof MailFake ? $manager->manager : $manager;
+        $mailer = $manager->mailer('smtp');
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->assertSuccessful();
+
+        $this->assertSame($mailer, $manager->mailer('smtp'));
     }
 
     #[Test]

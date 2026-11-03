@@ -6,6 +6,14 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [1.3.2] - 2026-11-03
+
+### Fixed
+
+- **Mailers from transport packages, such as MailerSend, pass the mailer check.** Canary checked
+  each mailer on a new mail manager, which doesn't have the transports packages register, so
+  every site sending through one failed with `Unsupported mail transport`.
+
 ## [1.3.1] - 2026-11-02
 
 ### Changed

@@ -8,12 +8,12 @@ use D3Creative\Canary\Forms\TestSubmission;
 use Illuminate\Console\Command;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Mailer;
-use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use Illuminate\Support\Testing\Fakes\MailFake;
 use ReflectionFunction;
 use RuntimeException;
 use Statamic\Console\RunsInPlease;
@@ -759,8 +759,12 @@ class FormsCommand extends Command
             }
 
             try {
-                // A fresh manager, so the site's own mailers, or a test's fake, aren't touched.
-                (new MailManager(app()))->mailer($mailer)->getSymfonyTransport();
+                // A copy of the site's manager, so transports that packages add with extend(), such as
+                // mailersend, are there. Its cached mailers are dropped, so the site's own aren't touched.
+                $manager = app('mail.manager');
+                $manager = $manager instanceof MailFake ? $manager->manager : $manager;
+
+                (clone $manager)->forgetMailers()->mailer($mailer)->getSymfonyTransport();
             } catch (Throwable $e) {
                 $this->components->error("{$form->handle()}: the {$mailer} mailer can't be created, so its emails couldn't be sent. {$e->getMessage()}");
 

@@ -179,7 +179,9 @@ class EmailsInCodeTest extends TestCase
             ])
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
             ->expectsOutputToContain('quote: '.BuildsQuoteEmails::class." builds emails in code, which Canary can't see. Add canaryEmails() to it.")
-            ->assertSuccessful();
+            // Canary saw no emails and has no check for the listener, so nothing ran.
+            ->expectsOutputToContain('Nothing was tested in quote')
+            ->assertFailed();
     }
 
     #[Test]
@@ -216,7 +218,9 @@ class EmailsInCodeTest extends TestCase
                 "widget - nothing in the form's settings, ".SplitsB2bForms::class.' may handle it',
             ])
             ->expectsConfirmation('Save these as the forms to test next time?', 'no')
-            ->assertSuccessful();
+            // The listener has no API check and the form no emails, so the run itself tests nothing.
+            ->expectsOutputToContain('Nothing was tested in b2b_contact')
+            ->assertFailed();
     }
 
     #[Test]

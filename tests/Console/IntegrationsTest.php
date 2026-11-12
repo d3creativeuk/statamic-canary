@@ -264,7 +264,9 @@ class IntegrationsTest extends TestCase
 
         $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com', '--subscribe' => true])
             ->expectsOutputToContain('newsletter: ForgottenCRM: --subscribe skipped, as it has no canaryContact and canaryDelete methods.')
-            ->assertSuccessful();
+            // It has no API check either, and the form has no emails.
+            ->expectsOutputToContain('Nothing was tested in newsletter')
+            ->assertFailed();
     }
 
     #[Test]
@@ -299,6 +301,50 @@ class IntegrationsTest extends TestCase
             ->assertSuccessful();
 
         $this->assertSame([], ContactToActiveCampaign::$received);
+    }
+
+    #[Test]
+    public function a_listener_found_in_code_is_not_counted_as_a_passed_check()
+    {
+        $this->makeForm('contact', [self::EMAIL]);
+        Event::forget(FormSubmitted::class);
+        Event::listen(FormSubmitted::class, ContactToActiveCampaign::class);
+
+        $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Tested 1 form: 1 email dispatched, 1 integration without an API check.')
+            ->doesntExpectOutputToContain('integration check passed')
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function a_form_with_no_emails_and_only_unchecked_listeners_tests_nothing()
+    {
+        // lbf-com's forms: no emails, and ActiveCampaign listeners found by reading their code.
+        $this->makeForm('contact');
+        Event::forget(FormSubmitted::class);
+        Event::listen(FormSubmitted::class, ContactToActiveCampaign::class);
+
+        foreach ([[], ['--dry-run' => true]] as $options) {
+            $this->artisan('canary:forms', ['forms' => ['contact'], '--to' => 'me@example.com', ...$options])
+                ->expectsOutputToContain("contact: ActiveCampaign found, but there's no API check.")
+                ->expectsOutputToContain('Nothing was tested in contact')
+                ->expectsOutputToContain("Canary tested nothing, so it can't say any form works.")
+                ->doesntExpectOutputToContain('check passed')
+                ->assertFailed();
+        }
+
+        $this->assertSame([], ContactToActiveCampaign::$received);
+    }
+
+    #[Test]
+    public function a_form_with_no_emails_and_a_checked_listener_is_tested()
+    {
+        $this->makeForm('newsletter');
+
+        $this->artisan('canary:forms', ['forms' => ['newsletter'], '--to' => 'me@example.com'])
+            ->expectsOutputToContain('Tested 1 form: 1 integration check passed.')
+            ->doesntExpectOutputToContain('Nothing was tested')
+            ->assertSuccessful();
     }
 
     #[Test]

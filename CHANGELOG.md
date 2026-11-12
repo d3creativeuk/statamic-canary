@@ -6,6 +6,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Fixed
+
+- **A listener without an API check no longer counts as a check that passed.** Canary found it
+  by reading its code but ran nothing against it, yet the summary said "integration check
+  passed". On a site whose forms have no emails and send only to an unchecked CRM, such as
+  ActiveCampaign listeners without `canaryCheck()`, a run tested nothing and still exited 0. Those
+  forms now count as tested nothing, so such a run fails, and the summary counts the listeners
+  as "without an API check".
+
 ## [1.3.2] - 2026-11-03
 
 ### Fixed

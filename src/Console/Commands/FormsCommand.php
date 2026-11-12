@@ -67,10 +67,16 @@ class FormsCommand extends Command
 
     private int $apiChecks = 0;
 
+    /** Integrations found without an API check, so nothing was run against them. */
+    private int $notChecked = 0;
+
     /** Mailers already created this run, by name. */
     private array $mailers = [];
 
     private array $untested = [];
+
+    /** Forms with no emails whose integrations have no API check. */
+    private array $unchecked = [];
 
     public function handle(): int
     {
@@ -386,6 +392,10 @@ class FormsCommand extends Command
             $this->components->warn('Nothing to test in '.implode(', ', $this->untested).'.');
         }
 
+        if ($this->unchecked) {
+            $this->components->warn('Nothing was tested in '.implode(', ', $this->unchecked).": no emails, and no API check for their integrations. See ".self::INTEGRATION_DOCS);
+        }
+
         if (! $this->tested) {
             $this->components->error("Canary tested nothing, so it can't say any form works.");
 
@@ -395,6 +405,7 @@ class FormsCommand extends Command
         $results = array_filter([
             $this->dispatched ? $this->dispatched.' '.Str::plural('email', $this->dispatched).' '.$this->sentVerb() : null,
             $this->checksPassed ? $this->checksPassed.' integration '.Str::plural('check', $this->checksPassed).' passed' : null,
+            $this->notChecked ? $this->notChecked.' '.Str::plural('integration', $this->notChecked).' without an API check' : null,
         ]);
 
         $this->components->info("Tested {$this->tested} ".Str::plural('form', $this->tested).($results ? ': '.implode(', ', $results) : '').'.');
@@ -632,6 +643,7 @@ class FormsCommand extends Command
         }
 
         $this->tested++;
+        $before = [$this->checksPassed, $this->apiChecks];
 
         $passed = ! $emails || $this->sendEmails($form, $emails, $to, $site, $submission);
 
@@ -641,6 +653,13 @@ class FormsCommand extends Command
 
         foreach ($integrations->filter(fn (Integration $integration) => $integration->buildsHiddenEmails()) as $integration) {
             $this->components->warn("{$handle}: {$integration->class} builds emails in code, which Canary can't see. Add canaryEmails() to it. See ".self::EMAILS_IN_CODE_DOCS);
+        }
+
+        // No emails, and listeners Canary could only find, not check: counting it as
+        // tested would report a pass for a form nothing was run against.
+        if ($passed && ! $emails && [$this->checksPassed, $this->apiChecks] === $before) {
+            $this->tested--;
+            $this->unchecked[] = $handle;
         }
 
         return $passed;
@@ -929,7 +948,10 @@ class FormsCommand extends Command
             default => $this->components->warn("{$label} found, but there's no API check. See ".self::INTEGRATION_DOCS),
         };
 
-        $this->checksPassed++;
+        // Found isn't checked, so it isn't counted as a pass.
+        $integration->hasApiCheck() || $integration->package() !== null
+            ? $this->checksPassed++
+            : $this->notChecked++;
 
         return true;
     }

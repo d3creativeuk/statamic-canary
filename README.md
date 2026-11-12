@@ -168,7 +168,7 @@ Use it for a first run on a site you don't know, before anything is sent.
 
 The command exits non-zero if a form doesn't exist, an email fails its checks or fails to dispatch, or an integration check fails, so a deploy script can stop.
 
-It also exits non-zero if the run tests nothing at all, because a run that sends nothing proves nothing. A form with nothing to test alongside others shows a warning but doesn't fail the run. Every run ends with a summary, such as "Tested 4 forms: 3 emails dispatched, 1 integration check passed."
+It also exits non-zero if the run tests nothing at all, because a run that sends nothing proves nothing. A form with no emails whose only integrations have no API check counts as testing nothing, as Canary found the integration but ran nothing against it. A form with nothing to test alongside others shows a warning but doesn't fail the run. Every run ends with a summary, such as "Tested 4 forms: 3 emails dispatched, 1 integration check passed."
 
 When the emails go through a real queue, the summary reminds you to check `php artisan queue:failed` if one doesn't arrive, since Canary only sees them dispatched. `--now` sends them during the run instead, so a mailer error fails it.
 
@@ -426,7 +426,7 @@ It also finds the fields a listener reads (`$submission->email` or `$submission-
 contact - notification email, ActiveCampaign (no API check)
 ```
 
-That's enough to check the listener is registered and the form still has its fields. The API check needs `canaryCheck()`, because only the listener knows the API key and the list. If Canary can't work out a listener's forms at all, every run starts with a warning naming it:
+That's enough to check the listener is registered and the form still has its fields. The API check needs `canaryCheck()`, because only the listener knows the API key and the list. A listener without one isn't counted as a check that passed, so a form with no emails and only such listeners counts as tested nothing. If Canary can't work out a listener's forms at all, every run starts with a warning naming it:
 
 ```
 WARN  Canary can't tell which forms App\Listeners\ActiveCampaignSubscriber handles. See https://github.com/d3creativeuk/statamic-canary#checking-integrations.

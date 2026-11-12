@@ -14,7 +14,7 @@ There's no JavaScript. `src/ServiceProvider.php` only merges and publishes `conf
 
 ## How it works
 
-A real submission (`Statamic\Http\Controllers\FormController`) does four things: `makeSubmission()`, fire `FormSubmitted`, save the submission (which fires `SubmissionCreated`), then `SendEmails::dispatch()`. Canary does the first and last only. Skipping the events is the point: newsletter and CRM integrations listen on them.
+A real submission (`Statamic\Http\Controllers\FormController`) does four things: `makeSubmission()`, fire `FormSubmitted`, save the submission (which fires `SubmissionCreated`), then `SendEmails::dispatch()`. Canary does the first and last only. Skipping the events is the point: newsletter and CRM integrations listen on them. The one exception is `--submit` (see below), which deliberately does all four, for opted-in forms only.
 
 - **`Form::email($config)` changes the in-memory form only.** Never call `$form->save()` in the command, or the client's real recipients are overwritten.
 - **`$form->email()` can be a list or a single associative array** with a `to` key. `emailConfigs()` normalises it, as `SendEmails::emailConfigs()` does.
@@ -47,7 +47,18 @@ Form handles come from the arguments, then `config('canary.forms')`, then the `f
 - **`--dry-run` stops in `sendEmails()` after the checks and render**, before the form's emails are swapped or anything is dispatched. It still runs API checks, which are read-only and guarded. It refuses `--subscribe` and `--now`.
 - **`checkMailers()` creates each email's mailer on a clone of the app's `MailManager`**, with `forgetMailers()` called on the clone, so a missing transport fails before dispatch. A fresh `MailManager` was wrong: packages such as MailerSend register their transport with `extend()` on the app's manager, so a new one said `Unsupported mail transport`. The clone keeps those creators but leaves the app's cached mailers alone, and under `Mail::fake()` it clones `MailFake::$manager`, the real one. Creating a transport doesn't connect or send.
 - **A run that tests nothing exits non-zero**, as a pass that sent nothing is the false all-clear 1.2 was built to stop. A listener without an API check (read from source) isn't counted in `checksPassed`, and a form with no emails and only such listeners counts as untested (`$unchecked`). lbf-com's seven forms were exactly that and reported "7 integration checks passed".
-- **Client-facing sample data never says "Canary".** `sampleData(..., clientFacing: true)` uses "TEST form submission" for text and textareas, because it ends up in the client's own MailerLite or ActiveCampaign. Emails to the test address only reach a developer, so they keep "Sent by Canary. Please ignore."
+- **Sample data never says "Canary"**, in any mode, as it ends up in client inboxes and services. Textareas get `testMessage()`, "Test submission from {canary.from_name}. Please ignore." (`CANARY_FROM_NAME`, default "D3 Creative"; empty drops "from …"), and other text fields "Test submission". `clientFacing` now only changes checkboxes (one option instead of all). A text field with an `email`/`email:*` rule gets the address too, and the form's honeypot field is never filled, as it would silently drop a real submission.
+
+## --submit
+
+`--submit` sends a real submission, for forms whose notifications come from a CRM automation, which a normal run can't reach. It runs after every normal check for the form has passed, and `sendEmails()` returns before dispatching in this mode, as the real submission sends them.
+
+- **Only forms in `canary.submit`** (`CANARY_SUBMIT`, comma-separated). Any other handle fails the whole run before anything is tested. It's refused with `--dry-run`, `--subscribe` and `--now`, and `--real-recipients` needs it.
+- **`src/Forms/RealSubmission.php`** builds a POST `Request` to `statamic.forms.submit`, clones that named route, `bind()`s it to the request and sets the `form` parameter to the form object (route model binding is middleware, which is skipped), then `FrontendFormRequest::createFrom()` + `validateResolved()` and `FormController::submit()`. `Accept: application/json` makes failures throw `ValidationException` and success return JSON (`submission_created` false means the honeypot or a listener returning false dropped it). `REMOTE_ADDR` is 127.0.0.1 so a listener's IP rate limit doesn't share the visitors' bucket, and the referer is the site's URL, which Statamic uses to pick the site. The request is bound as `request` and on the URL generator for the call, so listeners that inject `Request` get it, then restored. CSRF, the session and the route throttle are skipped.
+- **Queued jobs are recorded with a `JobQueued` listener** that switches itself off, as in `Integration::run()`. `$event->queue` is null for a job on the connection's default queue, so it falls back to `queue.connections.{name}.queue`.
+- **The address is new each run**: `submitAddress()` adds `+test-{form slug}-{YmdHis}` to `--to` (or `-test-…` when it already has a plus), so it's never an existing contact. It's still refused if `canaryContact()` finds it.
+- **The form's emails are swapped on the in-memory form** for the call and restored in `finally`, as in a normal run. `--real-recipients` keeps the recipients (and cc/bcc) and only prefixes the subject. A listener that builds emails in code (`buildsEmails()` or `buildsHiddenEmails()`) is refused without `--real-recipients`, as those can't be redirected.
+- **Each integration with `canaryContact()` is polled** every 5 seconds for up to 90 with `Illuminate\Support\Sleep`, then `DeleteTestContact` (stores only the listener class, form and ID) is queued with `delay(canary.delete_after minutes)`. On the `sync` queue a delay runs at once, so no delete is queued and the contact is left to delete by hand. Integrations without the two methods run for real and are warned about.
 
 ## Tests
 
@@ -65,6 +76,7 @@ vendor/bin/phpunit
 - `tests/Console/EmailsInCodeTest.php` uses `tests/Fixtures/HandleFormSubmissions.php`, shaped like Outernet's listener: staff routing by ticked interests, an auto-reply, and a recipient tests can empty or set to a placeholder.
 - Emails are rendered before dispatch, so form emails in tests need a template. `tests/Fixtures/views` is added to `view.paths` in `TestCase`.
 - With `Queue::fake()`, `SendEmails`' chain pushes only its first job; the rest are in that job's `chained`.
+- **`tests/Console/SubmitTest.php`** freezes time (`Carbon::setTestNow`) so the plus address is predictable, and uses `Sleep::fake()`. `Queue::fake()` never fires `JobQueued`, so the test that checks the queue report uses a real `database` queue on testbench's SQLite, with a `jobs` table made in the test, and runs `AddToFakeCrm` from `Sleep::whenFakingSleep()` as the "worker". `SampledCrm` is a `FakeCrm` with `canarySample()`, kept separate so `FakeCrm`'s method list in `ScanTest` doesn't change.
 
 ## Manual checks
 

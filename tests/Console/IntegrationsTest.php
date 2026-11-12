@@ -178,8 +178,8 @@ class IntegrationsTest extends TestCase
 
         $this->assertCount(1, FakeCrm::$received);
         $this->assertSame('me@example.com', FakeCrm::$received[0]['business_email']);
-        $this->assertSame('TEST form submission', FakeCrm::$received[0]['full_name']);
-        $this->assertSame('TEST form submission. Please ignore.', FakeCrm::$received[0]['message_text']);
+        $this->assertSame('Test submission', FakeCrm::$received[0]['full_name']);
+        $this->assertSame('Test submission from D3 Creative. Please ignore.', FakeCrm::$received[0]['message_text']);
         $this->assertSame(['contact-1'], FakeCrm::$deleted);
         $this->assertSame([], FakeCrm::$contacts);
 

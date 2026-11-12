@@ -27,8 +27,10 @@ use Throwable;
  *   canaryEmails(string $form, Submission $s): array     the emails it builds, as $form->email() returns them
  *   canaryContact(string $form, string $email): ?string  the contact's ID in the account, or null
  *   canaryDelete(string $form, string $id): void         deletes that contact
+ *   canarySample(string $form): array                    field => value overrides for --submit's sample data
  *
- * The last two are needed for --subscribe. Without canaryForms(), Canary reads
+ * canaryContact() and canaryDelete() are needed for --subscribe, and let --submit
+ * check the contact arrived and delete it later. Without canaryForms(), Canary reads
  * the listener's code instead (ListenerSource), which can't give an API check.
  * A listener with canaryEmails() and no name or check only builds emails, so
  * it isn't listed as an integration.
@@ -96,7 +98,7 @@ class Integration
     public function methods(): array
     {
         return array_values(array_filter(
-            ['canaryForms', 'canaryName', 'canaryCheck', 'canaryChecks', 'canaryEmails', 'canaryContact', 'canaryDelete'],
+            ['canaryForms', 'canaryName', 'canaryCheck', 'canaryChecks', 'canaryEmails', 'canaryContact', 'canaryDelete', 'canarySample'],
             fn ($method) => method_exists($this->class, $method),
         ));
     }
@@ -312,6 +314,15 @@ class Integration
     public function registered(): bool
     {
         return $this->event !== null;
+    }
+
+    /**
+     * Field => value overrides for --submit, for a field the sample can't fill so that
+     * it validates, such as a hidden product ID the listener looks up.
+     */
+    public function sample(string $form): array
+    {
+        return method_exists($this->class, 'canarySample') ? ($this->listener()->canarySample($form) ?? []) : [];
     }
 
     public function canSubscribe(): bool

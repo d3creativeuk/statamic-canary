@@ -85,7 +85,7 @@ class FormsCommandTest extends TestCase
 
             return $mail->hasTo('me@example.com')
                 && ! $mail->hasTo('client@example.com')
-                && $mail->subject === 'TEST: Test submitted the contact form.';
+                && $mail->subject === 'TEST: Test submission submitted the contact form.';
         });
     }
 
@@ -585,16 +585,29 @@ class FormsCommandTest extends TestCase
             'multi-select' => [['type' => 'select', 'multiple' => true, 'options' => [['key' => 'a', 'value' => 'A'], ['key' => 'b', 'value' => 'B']]], ['a', 'b']],
             'select' => [['type' => 'select', 'options' => ['a', 'b']], 'a'],
             'radio' => [['type' => 'radio', 'options' => [['key' => 'a', 'value' => 'A']]], 'a'],
-            'textarea' => [['type' => 'textarea'], 'Sent by Canary. Please ignore.'],
-            'text' => [['type' => 'text'], 'Test'],
+            'textarea' => [['type' => 'textarea'], 'Test submission from D3 Creative. Please ignore.'],
+            'text' => [['type' => 'text'], 'Test submission'],
+            'text with an email rule' => [['type' => 'text', 'validate' => ['required', 'email:filter']], 'me@example.com'],
         ];
     }
 
     #[Test]
-    public function client_facing_samples_dont_mention_canary()
+    public function samples_never_mention_canary()
     {
-        $this->assertSame('TEST form submission. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com', true));
-        $this->assertSame('TEST form submission', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'text']), 'me@example.com', true));
+        foreach ([true, false] as $clientFacing) {
+            $this->assertSame('Test submission from D3 Creative. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com', $clientFacing));
+            $this->assertSame('Test submission', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'text']), 'me@example.com', $clientFacing));
+        }
+    }
+
+    #[Test]
+    public function the_test_message_names_who_it_is_from()
+    {
+        config(['canary.from_name' => 'Acme Web']);
+        $this->assertSame('Test submission from Acme Web. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com'));
+
+        config(['canary.from_name' => '']);
+        $this->assertSame('Test submission. Please ignore.', $this->callPrivate('sampleValue', new Field('sample', ['type' => 'textarea']), 'me@example.com'));
     }
 
     #[Test]

@@ -14,6 +14,8 @@ If the emails arrive, the templates, sender, mail provider and queue worker are 
 
 Canary can also check a form's integrations, such as MailerLite or ActiveCampaign, without adding anyone to them. See [Checking integrations](#checking-integrations).
 
+When a form's notifications come from somewhere else, such as a CRM automation, `--submit` sends a real submission from a test address instead, through the form's validation, listeners and queue, and checks it arrived. See [Sending real submissions](#sending-real-submissions).
+
 ![Canary by D3 Creative](art/canary-art.jpg)
 
 ## Installation
@@ -53,6 +55,9 @@ php artisan canary:forms contact -v
 
 # Also add the test address to each integration, then delete it
 php artisan canary:forms newsletter --subscribe
+
+# Send a real submission through the form, its listeners and the queue, from a test address
+php artisan canary:forms contact --submit
 ```
 
 The examples without `--to` assume `CANARY_TO` is set. See [Setting defaults](#setting-defaults).
@@ -107,6 +112,14 @@ CANARY_TO=you@example.com
 ```
 
 Now `php artisan canary:forms` needs no options at all.
+
+The other settings, all optional:
+
+| `.env` | Default | What it does |
+|---|---|---|
+| `CANARY_FROM_NAME` | `D3 Creative` | Named in every test message: "Test submission from D3 Creative. Please ignore." Leave it empty for "Test submission. Please ignore." |
+| `CANARY_SUBMIT` | none | The forms `--submit` may send, comma-separated, such as `contact,quote`. See [Sending real submissions](#sending-real-submissions). |
+| `CANARY_DELETE_AFTER` | `15` | Minutes after a `--submit` run before each test contact is deleted. |
 
 You can also list the forms in `config/canary.php` instead of saving them from the list:
 
@@ -453,7 +466,7 @@ ERROR  newsletter: MailerLite check failed: [url] /api/groups/1234567890 [http m
 `--subscribe` also tests the listener's own code, by sending it a test submission. For each integration with `canaryContact()` and `canaryDelete()`, Canary:
 
 1. Checks your test address isn't already a contact. If it is, Canary stops, because deleting it afterwards would remove a real subscription. Use a `--to` address that isn't a contact.
-2. Runs **that listener alone** with an unsaved submission. Other listeners don't run, and the submission can't be saved, even if the listener tries. Email fields get your test address, and text fields get "TEST form submission", so anyone looking at the service can see it's a test.
+2. Runs **that listener alone** with an unsaved submission. Other listeners don't run, and the submission can't be saved, even if the listener tries. Email fields get your test address, text fields get "Test submission", and message fields get "Test submission from D3 Creative. Please ignore.", so anyone looking at the service can see it's a test.
 3. Checks the contact arrived, then deletes it.
 
 If the delete fails, Canary prints the contact's ID so you can delete it by hand.
@@ -462,13 +475,57 @@ Canary refuses `--subscribe` for a listener that sends to more than one service,
 
 Deleting the contact doesn't undo what happened when it was added. If the list or group starts an automation, it may already have sent its first email to your test address, notified someone, or called a webhook. Check a site's automations before the first `--subscribe` run. A listener with its own rate limit may also ignore a second run within a short time; Canary reports that the contact never arrived.
 
+## Sending real submissions
+
+Some forms have no emails of their own: a CRM automation, such as ActiveCampaign's, notifies the client's staff once the site has passed the enquiry on. A normal run can only check that the CRM is set up. `--submit` tests the whole path, the way a visitor's submission takes it:
+
+```bash
+php artisan canary:forms --submit --to=you@example.com
+```
+
+For each form, Canary:
+
+1. **Makes a new test address** from `--to`, such as `you+test-contact-20261112140500@example.com`, so it's never an existing contact and each test can be found later. Your mail provider needs to accept plus addresses.
+2. **Submits the form** through Statamic's own form request and controller, with sample values. Validation, the honeypot, `FormSubmitted`, `SubmissionCreated` and every listener run as they would for a visitor, and their jobs go on the real queue. Only the HTTP layer is skipped: CSRF, the session and Statamic's route throttle. A validation error fails the form and names the field.
+3. **Sends the form's own emails to `--to`**, marked `TEST: `, as a normal run does.
+4. **Waits up to 90 seconds for the contact** to reach each integration that has `canaryContact()`. When the listener adds it from a job, that proves a queue worker ran the job.
+5. **Queues a delete** of the test contact, through `canaryDelete()`, for 15 minutes later (`CANARY_DELETE_AFTER`), once the integration's automations have had time to send.
+
+The message fields say "Test submission from D3 Creative. Please ignore." (set the name with `CANARY_FROM_NAME`), and text fields say "Test submission". Nothing a recipient sees mentions Canary.
+
+If every email arrives, the form, its validation, the queue worker, the integration and its automations all work.
+
+### Only the forms you list
+
+A real submission reaches real systems, so `--submit` only runs on forms listed in `canary.submit`:
+
+```env
+CANARY_SUBMIT=contact,quote
+```
+
+Only list a form once you know where its submissions go. If a CRM automation notifies staff, give it a branch for your test address first (for example, contacts whose email ends in your own domain notify only you), or agree the tests with the client. Canary can't see inside the CRM, so it can't tell.
+
+### Real recipients
+
+`--real-recipients` sends the form's own emails to their real recipients instead of `--to`, with the subject marked `TEST: `. Use it to test a site's real routing, once the client knows to expect the emails.
+
+Without it, Canary refuses a form whose listener builds and sends emails in code, because it can't redirect those.
+
+### What --submit can't undo
+
+- **Emails already sent.** Notifications and auto-replies have gone by the time the contact is deleted.
+- **What's saved.** A form that stores submissions saves the test one, labelled as a test.
+- **Integrations without `canaryContact()` and `canaryDelete()`.** They run for real, and Canary warns that it can't check or remove what they added.
+
+On the `sync` queue, nothing runs through a worker, and a delayed delete would run at once, so Canary leaves the test contact for you to delete by hand.
+
 ## Canary doesn't change your site
 
 Canary never edits your forms, templates, config or content.
 
 - **Form settings.** Canary loads the form and swaps the recipients on that loaded copy, in memory, for the length of the run. The form's file is never written, so the next real submission goes to the real recipients as usual.
-- **Submissions.** None are saved, even for forms that store submissions or accept file uploads.
-- **Integrations.** `FormSubmitted` and `SubmissionCreated` aren't fired, so newsletter, CRM and other form listeners don't run. Integration checks are read-only, and Canary blocks any request through Laravel's HTTP client during a check that isn't a GET or HEAD. Only `--subscribe` adds anything to a service, and it deletes the contact afterwards.
+- **Submissions.** None are saved, even for forms that store submissions or accept file uploads, except by `--submit`, which sends a real one.
+- **Integrations.** `FormSubmitted` and `SubmissionCreated` aren't fired, so newsletter, CRM and other form listeners don't run. Integration checks are read-only, and Canary blocks any request through Laravel's HTTP client during a check that isn't a GET or HEAD. Only `--subscribe` and `--submit` add anything to a service, and they delete the test contact afterwards when the listener can.
 
 The only file Canary writes is `resources/addons/statamic-canary.yaml`, and only when you choose to save your picked forms.
 
@@ -485,7 +542,7 @@ On a site you don't know, start with `--dry-run`, which never hands an email to 
 
 - **The API, for listeners without `canaryCheck()`.** Canary can still find their forms and fields from their code, but only the listener knows how to reach the service.
 - **Integrations that aren't listeners**, such as a webhook from a third-party addon.
-- **Validation.** Sample values only need to render in a template. Canary tests the email path, not the form.
+- **Validation**, except with `--submit`. Otherwise sample values only need to render in a template, as Canary tests the email path, not the form.
 - **The inbox.** Canary proves the email jobs were dispatched. Checking that they arrived is up to you.
 
 A scheduled mode that alerts you when a form stops sending, and a Control Panel page, aren't in this version yet.

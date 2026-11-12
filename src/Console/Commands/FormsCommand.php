@@ -2,8 +2,10 @@
 
 namespace D3Creative\Canary\Console\Commands;
 
+use D3Creative\Canary\Forms\DeleteTestContact;
 use D3Creative\Canary\Forms\Integration;
 use D3Creative\Canary\Forms\ReadOnlyRequests;
+use D3Creative\Canary\Forms\RealSubmission;
 use D3Creative\Canary\Forms\TestSubmission;
 use Illuminate\Console\Command;
 use Illuminate\Mail\Events\MessageSending;
@@ -12,6 +14,7 @@ use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use Illuminate\Support\Testing\Fakes\MailFake;
 use ReflectionFunction;
@@ -44,13 +47,22 @@ class FormsCommand extends Command
                             {--now : Send the emails straight away instead of through the queue, so mailer errors fail the run}
                             {--dry-run : Build and check every email and run the API checks, but send nothing}
                             {--scan : List everything that can act on a form submission, without testing anything}
-                            {--subscribe : Also add the test address through each integration, then delete it}';
+                            {--subscribe : Also add the test address through each integration, then delete it}
+                            {--submit : Send a real submission through each form, its listeners and the queue, from a test address. Forms must be listed in canary.submit}
+                            {--real-recipients : With --submit, send the form emails to their real recipients, marked TEST, instead of to --to}';
 
     private const DOCS = 'https://github.com/d3creativeuk/statamic-canary';
 
     private const INTEGRATION_DOCS = self::DOCS.'#checking-integrations';
 
     private const EMAILS_IN_CODE_DOCS = self::DOCS.'#emails-built-in-code';
+
+    private const SUBMIT_DOCS = self::DOCS.'#sending-real-submissions';
+
+    /** How long --submit waits for a test contact to reach an integration through the queue. */
+    private const CONTACT_WAIT_SECONDS = 90;
+
+    private const CONTACT_POLL_SECONDS = 5;
 
     /** Domains a missing setting usually falls back to, such as Laravel's hello@example.com. */
     private const PLACEHOLDER_DOMAINS = ['example.com', 'example.org', 'example.net'];
@@ -62,6 +74,8 @@ class FormsCommand extends Command
     private int $tested = 0;
 
     private int $dispatched = 0;
+
+    private int $submitted = 0;
 
     private int $checksPassed = 0;
 
@@ -107,7 +121,7 @@ class FormsCommand extends Command
         }
 
         // A dry run sends nothing, and both of these would.
-        foreach (['subscribe', 'now'] as $option) {
+        foreach (['subscribe', 'now', 'submit'] as $option) {
             if ($this->option('dry-run') && $this->option($option)) {
                 $this->components->error("--dry-run sends nothing, so it can't be used with --{$option}.");
 
@@ -115,9 +129,21 @@ class FormsCommand extends Command
             }
         }
 
+        if ($error = $this->submitOptionError()) {
+            $this->components->error($error);
+
+            return self::FAILURE;
+        }
+
         $this->warnAboutUnknownListeners();
 
         if (! $handles = $this->handles($to)) {
+            return self::FAILURE;
+        }
+
+        if ($this->option('submit') && $notListed = array_diff($handles, config('canary.submit', []))) {
+            $this->components->error('--submit sends real submissions, so it only runs on forms listed in canary.submit (CANARY_SUBMIT). Not listed: '.implode(', ', $notListed).'. See '.self::SUBMIT_DOCS);
+
             return self::FAILURE;
         }
 
@@ -323,6 +349,12 @@ class FormsCommand extends Command
      */
     private function reportQueue(): void
     {
+        if ($this->option('submit')) {
+            $this->components->warn($this->option('real-recipients')
+                ? "--submit sends a real submission from each form, and the form's emails go to their real recipients, marked TEST. Its integrations run for real too."
+                : "--submit sends a real submission from each form, from a test address. The form's emails go to the test address, but its integrations run for real.");
+        }
+
         if ($this->option('dry-run')) {
             $this->components->warn('Dry run: Canary builds and checks every email, but sends none.');
 
@@ -403,6 +435,7 @@ class FormsCommand extends Command
         }
 
         $results = array_filter([
+            $this->submitted ? $this->submitted.' '.Str::plural('submission', $this->submitted).' sent' : null,
             $this->dispatched ? $this->dispatched.' '.Str::plural('email', $this->dispatched).' '.$this->sentVerb() : null,
             $this->checksPassed ? $this->checksPassed.' integration '.Str::plural('check', $this->checksPassed).' passed' : null,
             $this->notChecked ? $this->notChecked.' '.Str::plural('integration', $this->notChecked).' without an API check' : null,
@@ -421,6 +454,10 @@ class FormsCommand extends Command
 
         if ($this->dispatched && ! $this->option('now') && $driver !== 'sync') {
             $this->components->info("If an email doesn't arrive, check php artisan queue:failed once a worker has run it.");
+        }
+
+        if ($this->submitted) {
+            $this->components->info("Each form's emails, and any its integrations send, should arrive within a few minutes. If one doesn't, check php artisan queue:failed.");
         }
 
         return true;
@@ -643,7 +680,7 @@ class FormsCommand extends Command
         }
 
         $this->tested++;
-        $before = [$this->checksPassed, $this->apiChecks];
+        $before = [$this->checksPassed, $this->apiChecks, $this->submitted];
 
         $passed = ! $emails || $this->sendEmails($form, $emails, $to, $site, $submission);
 
@@ -655,9 +692,14 @@ class FormsCommand extends Command
             $this->components->warn("{$handle}: {$integration->class} builds emails in code, which Canary can't see. Add canaryEmails() to it. See ".self::EMAILS_IN_CODE_DOCS);
         }
 
+        // Only once everything else passed, as a real submission can't be taken back.
+        if ($passed && $this->option('submit')) {
+            $passed = $this->submit($form, $to, $site, $integrations);
+        }
+
         // No emails, and listeners Canary could only find, not check: counting it as
         // tested would report a pass for a form nothing was run against.
-        if ($passed && ! $emails && [$this->checksPassed, $this->apiChecks] === $before) {
+        if ($passed && ! $emails && [$this->checksPassed, $this->apiChecks, $this->submitted] === $before) {
             $this->tested--;
             $this->unchecked[] = $handle;
         }
@@ -723,6 +765,11 @@ class FormsCommand extends Command
         }
 
         $merged = count($emails) > $swapped->count() ? ', covering '.count($emails).' that only differ by recipient' : '';
+
+        // The real submission sends them, so they're only checked here.
+        if ($this->option('submit')) {
+            return true;
+        }
 
         if ($this->option('dry-run')) {
             $this->dispatched += $swapped->count();
@@ -1002,6 +1049,198 @@ class FormsCommand extends Command
         return $passed;
     }
 
+    private function submitOptionError(): ?string
+    {
+        if (! $this->option('submit')) {
+            return $this->option('real-recipients') ? '--real-recipients only works with --submit.' : null;
+        }
+
+        return match (true) {
+            $this->option('subscribe') => '--subscribe runs one listener on its own and --submit runs them all, so use one or the other.',
+            $this->option('now') => "--submit tests the queue, so it can't be used with --now.",
+            default => null,
+        };
+    }
+
+    /**
+     * Sends a real submission from a new test address, through Statamic's own validation,
+     * listeners and queue. Then waits for each integration that can look a contact up to
+     * receive it, and queues the contact's deletion for once its automations have sent.
+     */
+    private function submit(FormContract $form, string $to, SiteObject $site, Collection $integrations): bool
+    {
+        $handle = $form->handle();
+
+        if (! $address = $this->submitAddress($to, $handle)) {
+            $this->components->error("{$handle}: couldn't make a test address from {$to}.");
+
+            return false;
+        }
+
+        // Canary can only redirect the form's own emails, not ones a listener sends itself.
+        $builders = $integrations->filter(fn (Integration $integration) => $integration->buildsEmails() || $integration->buildsHiddenEmails());
+
+        if (! $this->option('real-recipients') && $builders->isNotEmpty()) {
+            $this->components->error("{$handle}: not submitted, as ".$builders->pluck('class')->implode(', ')." builds emails in code, which would go to their real recipients. Add --real-recipients if they should.");
+
+            return false;
+        }
+
+        $tracked = $integrations->filter(fn (Integration $integration) => $integration->canSubscribe());
+
+        try {
+            // Deleting an address that was already a contact would remove a real one.
+            foreach ($tracked as $integration) {
+                if ($integration->listener()->canaryContact($handle, $address)) {
+                    $this->components->error("{$handle}: {$address} is already a contact in {$integration->name()}, so Canary won't submit it and delete it later.");
+
+                    return false;
+                }
+            }
+
+            $data = array_merge(
+                $this->sampleData($form, $address, clientFacing: true),
+                ...$integrations->map(fn (Integration $integration) => $integration->sample($handle))->values()->all(),
+            );
+        } catch (Throwable $e) {
+            $this->components->error("{$handle}: {$e->getMessage()}");
+
+            return false;
+        }
+
+        $original = $form->email();
+        $real = $this->option('real-recipients');
+
+        $emails = collect($this->emailConfigs($form))
+            ->map(fn ($email) => array_merge(
+                $real ? $email : Arr::except($email, ['cc', 'bcc']),
+                array_filter(['to' => $real ? null : $to, 'subject' => 'TEST: '.($email['subject'] ?? 'form email')]),
+            ))
+            ->unique(fn ($email) => json_encode($email))
+            ->values();
+
+        // Changes the in-memory form only. Never save it, or the real recipients are overwritten.
+        $form->email($emails->all());
+
+        try {
+            $result = RealSubmission::send($form, $data, $site);
+        } catch (Throwable $e) {
+            $this->components->error("{$handle}: the submission failed. {$e->getMessage()}");
+
+            return false;
+        } finally {
+            $form->email($original);
+        }
+
+        if ($result->errors) {
+            $this->components->error("{$handle}: the submission was rejected. ".collect($result->errors)
+                ->map(fn ($messages, $field) => "{$field}: ".implode(' ', $messages))
+                ->implode('; '));
+
+            return false;
+        }
+
+        if (! $result->created) {
+            $this->components->error("{$handle}: the submission was dropped silently, by the honeypot or a listener returning false.");
+
+            return false;
+        }
+
+        $this->submitted++;
+
+        $queued = collect($result->queued)
+            ->map(fn ($job) => $job[2].' on '.($job[1] ? "the {$job[1]} queue of " : '')."the {$job[0]} connection")
+            ->unique()
+            ->implode(', ');
+
+        $this->components->info("{$handle}: submitted from {$address}"
+            .($emails->isNotEmpty() ? ', with '.$emails->count().' email(s) to '.($real ? 'their real recipients' : $to) : '')
+            .($queued ? ". Queued {$queued}" : '').'.');
+
+        $passed = true;
+        $sync = config('queue.connections.'.config('queue.default').'.driver', config('queue.default')) === 'sync';
+        $minutes = (int) config('canary.delete_after', 15);
+
+        foreach ($integrations->reject(fn (Integration $integration) => $integration->onlyBuildsEmails()) as $integration) {
+            $label = "{$handle}: {$integration->name()}";
+
+            if (! $integration->canSubscribe()) {
+                $this->components->warn("{$label} ran for real, but has no canaryContact and canaryDelete methods, so Canary can't check what it added or remove it. See ".self::SUBMIT_DOCS);
+
+                continue;
+            }
+
+            try {
+                if ($reason = $integration->subscribeRefusal($handle)) {
+                    $this->components->warn("{$label}: {$reason}, so the test contact may be left in a service Canary can't delete it from.");
+                }
+
+                $id = $this->waitForContact($integration, $handle, $address);
+            } catch (Throwable $e) {
+                $this->components->error("{$label}: couldn't look the test contact up. {$e->getMessage()}");
+                $passed = false;
+
+                continue;
+            }
+
+            if (! $id) {
+                $this->components->error("{$label}: {$address} hadn't arrived after ".self::CONTACT_WAIT_SECONDS.' seconds. Check a queue worker is running, and php artisan queue:failed.');
+                $passed = false;
+
+                continue;
+            }
+
+            $how = $queued ? 'so a queue worker ran its job' : 'added straight away by the listener';
+
+            // The sync queue runs a delayed job at once, before the automations have sent.
+            if ($sync) {
+                $this->components->warn("{$label}: the test contact arrived ({$id}), {$how}. The queue is sync, so Canary can't delete it later: delete {$address} by hand once its emails have arrived.");
+
+                continue;
+            }
+
+            DeleteTestContact::dispatch($integration->class, $handle, (string) $id)->delay(now()->addMinutes($minutes));
+
+            $this->components->info("{$label}: the test contact arrived ({$id}), {$how}. It's deleted in {$minutes} minutes, once its automations have had time to send.");
+        }
+
+        return $passed;
+    }
+
+    /**
+     * A new address for each form and run, such as you+test-contact-20261112140501@example.com,
+     * so it's never an existing contact and each test can be found.
+     */
+    private function submitAddress(string $to, string $form): ?string
+    {
+        $local = Str::beforeLast($to, '@');
+        $tag = 'test-'.Str::slug($form).'-'.now()->format('YmdHis');
+        $address = $local.(str_contains($local, '+') ? '-' : '+').$tag.'@'.Str::afterLast($to, '@');
+
+        return filter_var($address, FILTER_VALIDATE_EMAIL) ? $address : null;
+    }
+
+    /**
+     * The contact's ID once it reaches the integration. A listener that adds it from a
+     * job needs a queue worker to run that job first.
+     */
+    private function waitForContact(Integration $integration, string $form, string $address): ?string
+    {
+        $listener = $integration->listener();
+
+        for ($waited = 0; ; $waited += self::CONTACT_POLL_SECONDS) {
+            if ($id = $listener->canaryContact($form, $address)) {
+                return (string) $id;
+            }
+
+            if ($waited >= self::CONTACT_WAIT_SECONDS) {
+                return null;
+            }
+
+            Sleep::for(self::CONTACT_POLL_SECONDS)->seconds();
+        }
+    }
+
     private function subscribe(FormContract $form, Integration $integration, string $to, string $label): bool
     {
         if (! $integration->canSubscribe()) {
@@ -1080,6 +1319,8 @@ class FormsCommand extends Command
     private function sampleData(FormContract $form, string $to, bool $clientFacing = false): array
     {
         return $form->blueprint()->fields()->all()
+            // A filled honeypot drops a real submission silently.
+            ->reject(fn (Field $field) => $field->handle() === $form->honeypot())
             ->mapWithKeys(fn (Field $field) => [$field->handle() => $this->sampleValue($field, $to, $clientFacing)])
             ->filter(fn ($value) => ! is_null($value))
             ->all();
@@ -1090,7 +1331,7 @@ class FormsCommand extends Command
         $options = $field->get('options') ?? [];
 
         return match (true) {
-            $field->get('input_type') === 'email' => $to,
+            $field->get('input_type') === 'email' || $this->validatesAsEmail($field) => $to,
             $field->get('input_type') === 'url' => 'https://example.com',
             $field->get('input_type') === 'tel' => '000',
             in_array($field->type(), ['assets', 'files']) => null,
@@ -1100,9 +1341,29 @@ class FormsCommand extends Command
             // Every option, so routing rules that match on them all fire. Real services get one.
             $field->type() === 'checkboxes' || ($field->get('multiple') && filled($options)) => $clientFacing ? [$this->firstOption($options)] : $this->optionKeys($options),
             filled($options) => $this->firstOption($options),
-            $field->type() === 'textarea' => $clientFacing ? 'TEST form submission. Please ignore.' : 'Sent by Canary. Please ignore.',
-            default => $clientFacing ? 'TEST form submission' : 'Test',
+            $field->type() === 'textarea' => $this->testMessage(),
+            default => 'Test submission',
         };
+    }
+
+    /**
+     * Never names Canary: test submissions end up in the client's inboxes and services.
+     */
+    private function testMessage(): string
+    {
+        $from = trim((string) config('canary.from_name'));
+
+        return 'Test submission'.($from !== '' ? " from {$from}" : '').'. Please ignore.';
+    }
+
+    /**
+     * A text field without input_type: email can still have an email rule, and
+     * a real submission would fail it.
+     */
+    private function validatesAsEmail(Field $field): bool
+    {
+        return collect(Arr::flatten($field->rules()))
+            ->contains(fn ($rule) => is_string($rule) && ($rule === 'email' || str_starts_with($rule, 'email:')));
     }
 
     private function firstOption(array $options): mixed

@@ -6,6 +6,34 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) an
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are git-tag driven
 (`composer.json` carries no `version` field).
 
+## [Unreleased]
+
+### Added
+
+- **`--submit` sends a real submission and tests the whole path.** For forms whose notifications
+  come from a CRM automation rather than Statamic, a normal run could only check the CRM was set
+  up. `--submit` submits each form through Statamic's own form request and controller, from a new
+  plus address made from `--to`, so validation, the honeypot, the form's listeners and the real
+  queue all run. It then waits for the test contact to reach each integration with
+  `canaryContact()`, which proves a queue worker ran the job, and queues `canaryDelete()` for
+  `CANARY_DELETE_AFTER` minutes later (15 by default), once the integration's automations have
+  sent. It only runs on forms listed in `canary.submit` (`CANARY_SUBMIT`).
+- **`--real-recipients`**, with `--submit`, sends the form's own emails to their real recipients,
+  marked `TEST: `, to test a site's real routing.
+- **`canarySample()`** lets a listener give `--submit` a value the sample can't, such as a real
+  product ID for a hidden field.
+- **`CANARY_FROM_NAME`** sets who test submissions say they're from. It defaults to D3 Creative.
+
+### Changed
+
+- **Sample data never mentions Canary.** Message fields say "Test submission from D3 Creative.
+  Please ignore." and text fields say "Test submission", in emails to the test address too,
+  which said "Sent by Canary. Please ignore.".
+- **A text field with an `email` rule gets the test address**, not just one with
+  `input_type: email`.
+- **The form's honeypot field is left empty** in sample data, as filling it drops a real
+  submission.
+
 ## [1.3.3] - 2026-11-12
 
 ### Fixed
